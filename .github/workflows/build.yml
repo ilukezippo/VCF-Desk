@@ -1,0 +1,170 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore: ["*.md", "shots/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # lets the workflow create the release + tag
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 1) Build "VCF Desk.exe" on Windows
+  app:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path VCF_Desk.pyw -Pattern '^APP_VERSION = "(.+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        env:
+          # Build PyInstaller's launcher from source: antivirus engines flag the shared stock launcher far more often.
+          PYINSTALLER_COMPILE_BOOTLOADER: "1"
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements.txt
+          pip install --no-binary pyinstaller pyinstaller
+      - name: Build exe
+        shell: pwsh
+        run: |
+          Copy-Item VCF_Desk.pyw VCF_Desk.py
+          pyinstaller --noconfirm --clean --windowed --name "VCF Desk" `
+            --icon assets/vcfdesk.ico --version-file version_info.txt `
+            --hidden-import vcf_core --hidden-import access_parser --hidden-import pyodbc `
+            --exclude-module tkinter --exclude-module PySide6.QtNetwork --exclude-module PySide6.QtQml `
+            --exclude-module PySide6.QtQuick --exclude-module PySide6.QtPdf --exclude-module PySide6.QtSvg `
+            VCF_Desk.py
+      - name: Trim unused Qt files
+        run: |
+          Remove-Item "dist/VCF Desk/_internal/PySide6/opengl32sw.dll" -ErrorAction SilentlyContinue
+          Remove-Item "dist/VCF Desk/_internal/PySide6/translations" -Recurse -ErrorAction SilentlyContinue
+      - name: Smoke test (the built app opens a file, draws its window and quits)
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:VCFDESK_SNAPSHOT = "$PWD\smoke.png"
+          $p = Start-Process -FilePath "dist/VCF Desk/VCF Desk.exe" -ArgumentList "`"$PWD\tests\data\demo.vcf`"" -PassThru
+          for ($i = 0; $i -lt 90 -and -not (Test-Path smoke.png); $i++) { Start-Sleep -Seconds 1 }
+          Start-Sleep -Seconds 2
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          if (-not (Test-Path smoke.png)) { throw "VCF Desk did not draw its window" }
+          "smoke test ok: $((Get-Item smoke.png).Length) bytes"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshot
+          path: smoke.png
+          retention-days: 7
+      - name: Zip portable
+        run: Compress-Archive -Path "dist/VCF Desk" -DestinationPath "VCF-Desk-Portable-${{ steps.ver.outputs.version }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: dist/VCF Desk
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable
+          path: VCF-Desk-Portable-*.zip
+          retention-days: 7
+
+  # 2) Build the installer with Linux NSIS (it ships the 64-bit stubs) and publish the release
+  installer:
+    needs: app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: dist/VCF Desk
+      - uses: actions/download-artifact@v4
+        with:
+          name: portable
+          path: dist
+      - name: Install NSIS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
+      - name: Build installer
+        env:
+          V: ${{ needs.app.outputs.version }}
+        run: |
+          VI=$(echo "$V.0.0.0" | cut -d. -f1-4)
+          cd installer
+          makensis -V2 -DDISTDIR="$GITHUB_WORKSPACE/dist/VCF Desk" -DAPPVERSION="$V" -DVIVERSION="$VI" vcfdesk.nsi
+          ls -la ../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VCF-Desk-windows
+          path: |
+            dist/VCF-Desk-Setup-*.exe
+            dist/VCF-Desk-Portable-*.zip
+      - name: Check whether this version is already released
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ needs.app.outputs.version }}" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "v${{ needs.app.outputs.version }} already exists - not replacing its files (bump APP_VERSION to publish)"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Release notes (from CHANGELOG.md)
+        env:
+          VERSION: ${{ needs.app.outputs.version }}
+        run: |
+          {
+            echo "**VCF Desk — Contacts Manager.** A free, modern vCard (.vcf) editor for Windows."
+            echo
+            echo "**Install:** download \`VCF-Desk-Setup-$VERSION.exe\` below and run it (asks for admin, installs to \`C:\\Program Files\\VCF Desk\`)."
+            echo "The installer is not code-signed yet, so Windows may warn: if Edge holds the download, choose *… → Keep → Show more → Keep anyway*; if SmartScreen warns when you run it, choose *More info → Run anyway*."
+            echo
+            echo "**Portable:** \`VCF-Desk-Portable-$VERSION.zip\` — unzip anywhere and run \`VCF Desk.exe\`. Python is not needed."
+            echo
+            echo "Requires Windows 10 or 11, 64-bit."
+            echo
+            echo "## What's new in $VERSION"
+            awk -v head="## $VERSION" 'index($0, head) == 1 {on = 1; next} /^## / {if (on) exit} on' CHANGELOG.md | sed 's/^### /#### /'
+          } > release_notes.md
+          cat release_notes.md
+      - name: Release
+        # publishes v<VERSION> from main once; an existing release is never overwritten
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && steps.exists.outputs.released == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.app.outputs.version }}
+          name: VCF Desk ${{ needs.app.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body_path: release_notes.md
+          files: |
+            dist/VCF-Desk-Setup-*.exe
+            dist/VCF-Desk-Portable-*.zip
+      - name: Point the Download buttons at this installer
+        if: github.ref == 'refs/heads/main' && steps.exists.outputs.released == 'false'
+        env:
+          V: ${{ needs.app.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main && git checkout -B main origin/main
+          sed -i -E -e "s#releases/download/v[0-9][^/\"]*/VCF-Desk-Setup-[^/\")]*\.exe#releases/download/v$V/VCF-Desk-Setup-$V.exe#g" \
+                    -e "s#releases/download/v[0-9][^/\"]*/VCF-Desk-Portable-[^/\")]*\.zip#releases/download/v$V/VCF-Desk-Portable-$V.zip#g" \
+                    -e "s#VCF-Desk-Portable-[0-9][0-9.]*\.zip\*\*#VCF-Desk-Portable-$V.zip**#g" README.md
+          if git diff --quiet; then echo "buttons already point at $V"; exit 0; fi
+          git commit -am "Download buttons: VCF Desk $V"
+          git push origin main

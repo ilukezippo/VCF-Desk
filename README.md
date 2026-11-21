@@ -33,7 +33,7 @@
   <a href="#build-from-source">Build</a>
 </p>
 
-![VCF Desk with Arabic and English contacts](shots/main.png)
+![VCF Desk](shots/main.png)
 
 <p align="center"><sub>If VCF Desk saves you time, a ⭐ star on this page helps other people find it.</sub></p>
 

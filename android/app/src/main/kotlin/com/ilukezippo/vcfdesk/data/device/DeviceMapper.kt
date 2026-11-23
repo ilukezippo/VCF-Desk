@@ -43,6 +43,12 @@ sealed interface RowOp {
     }
 
     data class Delete(val id: Long) : RowOp
+
+    /**
+     * Add a GroupMembership row for a group titled [title] that the contact's account doesn't
+     * have yet: the writer creates the group in that account (or fails the contact).
+     */
+    data class JoinNewGroup(val title: String) : RowOp
 }
 
 /**
@@ -107,7 +113,8 @@ object DeviceMapper {
         val single = LinkedHashMap<String, DataRow>()
         val groups = ArrayList<Pair<DataRow, String>>()
         val untouched = ArrayList<DataRow>()
-        for (r in rows) when {
+        // "first row of a kind" and positional pairing must not depend on the order rows arrive in
+        for (r in rows.sortedWith(compareBy(nullsLast()) { it.id })) when {
             r.mimetype in TYPED_MIMES -> typed.getOrPut(r.mimetype) { ArrayList() }.add(r)
             r.mimetype in SINGLES && r.mimetype !in single -> single[r.mimetype] = r
             r.mimetype == GROUP -> {
@@ -164,7 +171,7 @@ object DeviceMapper {
      * Row operations that turn [before] into [after]. `after.photo == null` means "not loaded"
      * and never removes a photo; a photo is written only when it differs from [currentPhoto]
      * (the display photo, falling back to the row's thumbnail). [groupIds] maps the titles of the
-     * contact's account's groups to their ids; titles not in it are not added.
+     * contact's account's groups to their ids; a title not in it gives [RowOp.JoinNewGroup].
      */
     fun diff(
         before: List<DataRow>,
@@ -190,7 +197,8 @@ object DeviceMapper {
         val current = s.groups.map { it.second }.toSet()
         for ((row, t) in s.groups) if (t !in after.groups) ops += RowOp.Delete(row.id!!)
         for (t in after.groups) if (t !in current) {
-            groupIds[t]?.let { ops += RowOp.Insert(DataRow(null, GROUP, mapOf(D1 to it.toString()))) }
+            val gid = groupIds[t]
+            ops += if (gid != null) RowOp.Insert(DataRow(null, GROUP, mapOf(D1 to gid.toString()))) else RowOp.JoinNewGroup(t)
         }
         // photo
         val photo = after.photo

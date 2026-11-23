@@ -24,7 +24,10 @@ import java.io.FileNotFoundException
 class FakeContactsProvider : ContentProvider() {
     class Raw(val id: Long, val type: String?, val name: String?, var deleted: Boolean = false, var version: Int = 1)
     class Row(val id: Long, val rawId: Long, val mimetype: String, val values: MutableMap<String, Any?>)
-    class Group(val id: Long, val title: String, val type: String?, val name: String?, val deleted: Boolean = false)
+    class Group(
+        val id: Long, val title: String, val type: String?, val name: String?,
+        val deleted: Boolean = false, val visible: Boolean = true,
+    )
 
     val raws = linkedMapOf<Long, Raw>()
     val data = linkedMapOf<Long, Row>()
@@ -35,6 +38,10 @@ class FakeContactsProvider : ContentProvider() {
     val batches = mutableListOf<List<ContentProviderOperation>>()
     /** Make an applyBatch fail (whole batch) when this returns true. */
     var failBatch: (List<ContentProviderOperation>) -> Boolean = { false }
+    /** Make every group insert throw (e.g. an account that doesn't allow groups). */
+    var failGroupInsert = false
+    /** With no sortOrder, return rows newest first (a provider is free to use any order). */
+    var reverseWhenUnsorted = false
 
     private var nextRaw = 1L
     private var nextData = 1000L
@@ -75,7 +82,7 @@ class FakeContactsProvider : ContentProvider() {
         uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?,
         sortOrder: String?,
     ): Cursor {
-        calls += "query ${table(uri)}"
+        calls += "query ${table(uri)}" + (sortOrder?.let { " order=$it" } ?: "")
         val records: List<Map<String, Any?>> = when (table(uri)) {
             "raw_contacts" -> raws.values.map {
                 mapOf(
@@ -106,8 +113,19 @@ class FakeContactsProvider : ContentProvider() {
         cols.forEach { require(it in allCols) { "unknown column $it" } }
         val filter = parseSelection(selection, selectionArgs)
         val cursor = MatrixCursor(cols.toTypedArray())
-        for (rec in records.filter(filter)) cursor.addRow(cols.map { rec[it] }.toTypedArray())
+        for (rec in sort(records.filter(filter), sortOrder)) cursor.addRow(cols.map { rec[it] }.toTypedArray())
         return cursor
+    }
+
+    private fun sort(recs: List<Map<String, Any?>>, order: String?): List<Map<String, Any?>> {
+        if (order.isNullOrBlank()) return if (reverseWhenUnsorted) recs.reversed() else recs
+        var cmp: Comparator<Map<String, Any?>> = Comparator { _, _ -> 0 }
+        for (term in order.split(",")) {
+            val (col, dir) = term.trim().split(Regex("\\s+")).let { it[0] to it.getOrElse(1) { "ASC" }.uppercase() }
+            val c = compareBy<Map<String, Any?>> { (it[col] as? Number)?.toLong() ?: it[col]?.toString()?.toLongOrNull() }
+            cmp = cmp.then(if (dir == "DESC") c.reversed() else c)
+        }
+        return recs.sortedWith(cmp)
     }
 
     private fun parseSelection(sel: String?, args: Array<out String>?): (Map<String, Any?>) -> Boolean {
@@ -142,6 +160,15 @@ class FakeContactsProvider : ContentProvider() {
             "raw_contacts" -> {
                 val id = addRaw(v.getAsString("account_type"), v.getAsString("account_name"))
                 ContentUris.withAppendedId(RawContacts.CONTENT_URI, id)
+            }
+            "groups" -> {
+                if (failGroupInsert) throw IllegalArgumentException("groups not supported for this account")
+                val id = nextGroup++
+                groups[id] = Group(
+                    id, requireNotNull(v.getAsString("title")), v.getAsString("account_type"),
+                    v.getAsString("account_name"), visible = v.getAsInteger("group_visible") == 1,
+                )
+                ContentUris.withAppendedId(ContactsContract.Groups.CONTENT_URI, id)
             }
             "data" -> {
                 val rawId = requireNotNull(v.getAsLong("raw_contact_id")) { "raw_contact_id missing" }

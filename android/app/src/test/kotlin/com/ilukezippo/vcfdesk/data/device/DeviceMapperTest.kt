@@ -105,7 +105,9 @@ class DeviceMapperTest {
         val ops = DeviceMapper.diff(rows, edited, mapOf("Family" to 77L))
         assertTrue(ops.isNotEmpty())
         for (op in ops) {
-            val id = when (op) { is RowOp.Update -> op.id; is RowOp.Delete -> op.id; is RowOp.Insert -> op.row.id }
+            val id = when (op) {
+                is RowOp.Update -> op.id; is RowOp.Delete -> op.id; is RowOp.Insert -> op.row.id; is RowOp.JoinNewGroup -> null
+            }
             assertTrue("op touched unknown row: $op", id != 99L)
             if (op is RowOp.Insert) assertTrue(op.row.mimetype != whatsapp)
         }
@@ -129,6 +131,24 @@ class DeviceMapperTest {
 
         val removed = DeviceMapper.diff(allRows, c.copy(groups = emptySet()), mapOf("Family" to 77L))
         assertEquals(listOf<RowOp>(RowOp.Delete(14)), removed)
+
+        // a title the account has no group for is not dropped: it asks for the group to be created
+        val fresh = DeviceMapper.diff(allRows, c.copy(groups = setOf("Family", "Friends")), mapOf("Family" to 77L))
+        assertEquals(listOf<RowOp>(RowOp.JoinNewGroup("Friends")), fresh)
+    }
+
+    @Test
+    fun rowsAreUsedInIdOrderWhateverOrderTheyArrive() {
+        val rows = listOf(
+            row(31, Organization.CONTENT_ITEM_TYPE, "data1" to "Second"),
+            row(30, Organization.CONTENT_ITEM_TYPE, "data1" to "First"),
+        )
+        val c = DeviceMapper.toContact(1, phoneAcct, rows, emptyMap())
+        assertEquals("First", c.org.company)
+        assertEquals(
+            listOf<RowOp>(RowOp.Update(30, mapOf("data1" to "Edited"))),
+            DeviceMapper.diff(rows, c.copy(org = c.org.copy(company = "Edited")), emptyMap()),
+        )
     }
 
     @Test

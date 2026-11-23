@@ -9,6 +9,7 @@ import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
 import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.GroupMembership
 import android.provider.ContactsContract.Data
 import android.provider.ContactsContract.Groups
 import android.provider.ContactsContract.RawContacts
@@ -178,7 +179,7 @@ class DeviceSource(
     private fun queryData(rawIds: List<Long>?, all: Array<String> = emptyArray()): Map<Long, List<DataRow>> {
         val out = HashMap<Long, MutableList<DataRow>>()
         fun read(selection: String?, args: Array<String>, keep: Set<Long>?) {
-            resolver.query(Data.CONTENT_URI, dataProjection, selection, args, null)?.use { c ->
+            resolver.query(Data.CONTENT_URI, dataProjection, selection, args, DATA_ORDER)?.use { c ->
                 val iBlob = c.getColumnIndexOrThrow(Data.DATA15)
                 while (c.moveToNext()) {
                     val raw = c.getLong(1)
@@ -221,14 +222,55 @@ class DeviceSource(
 
     // ---- writing ----
 
-    /** One contact's operations; [build] gets the batch offset of its first op (for back-references). */
+    /** Where a new group's id comes from: an existing group, or a group insert earlier in the batch. */
+    private sealed interface GroupRef {
+        class Id(val id: Long) : GroupRef
+        class Ref(val index: Int) : GroupRef
+    }
+
+    private class GroupCreateFailed(title: String, label: String, cause: Exception) :
+        Exception("group $title could not be created in $label", cause)
+
+    private data class AccountKey(val type: String?, val name: String?)
+
+    private fun accountKey(type: String?, name: String?) = AccountKey(type?.ifEmpty { null }, name?.ifEmpty { null })
+
+    private fun groupInsert(a: AccountKey, title: String) = ContentProviderOperation.newInsert(Groups.CONTENT_URI)
+        .withValue(Groups.ACCOUNT_TYPE, a.type)
+        .withValue(Groups.ACCOUNT_NAME, a.name)
+        .withValue(Groups.TITLE, title)
+        .withValue(Groups.GROUP_VISIBLE, 1)
+        .build()
+
+    /** Ids of [titles] in account [a], creating missing groups one by one (outside any contact batch). */
+    private fun ensureGroups(a: AccountKey, titles: Set<String>): Map<String, Long> {
+        if (titles.isEmpty()) return emptyMap()
+        val have = groupIdsFor(queryGroups(), a.type, a.name)
+        return titles.associateWith { t ->
+            have[t] ?: try {
+                ContentUris.parseId(requireNotNull(resolver.applyBatch(ContactsContract.AUTHORITY, arrayListOf(groupInsert(a, t)))[0].uri))
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                throw GroupCreateFailed(t, accounts.tag(a.type, a.name).label, e)
+            }
+        }
+    }
+
+    /**
+     * One contact's operations. [build] gets the batch offset of its first op (for the raw contact
+     * back-reference) and where to find each of [newGroups] (groups to create in [account]).
+     * [size] counts one extra op per new group, so the batch stays within [MAX_OPS] even when
+     * this contact's batch is the one that creates them.
+     */
     private class Pending(
         val key: String,
         val size: Int,
         val bytes: Int,
-        /** Applies a contact too big for one batch; returns its raw contact id. */
-        val alone: (() -> Long?)? = null,
-        val build: (Int) -> List<ContentProviderOperation>,
+        val account: AccountKey = AccountKey(null, null),
+        val newGroups: Set<String> = emptySet(),
+        /** Applies a contact too big for one batch, given the new groups' ids; returns its raw contact id. */
+        val alone: ((Map<String, Long>) -> Long?)? = null,
+        val build: (Int, (String) -> GroupRef) -> List<ContentProviderOperation>,
     )
 
     private class Results(private val onProgress: (Int) -> Unit) {
@@ -268,8 +310,10 @@ class DeviceSource(
                 // a single huge contact: its own batches, in order
                 val p = batch[0]
                 try {
-                    val newId = p.alone?.invoke() ?: run {
-                        p.build(0).chunked(MAX_OPS).forEach { resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(it)) }
+                    val gids = ensureGroups(p.account, p.newGroups)
+                    val newId = p.alone?.invoke(gids) ?: run {
+                        p.build(0) { GroupRef.Id(gids.getValue(it)) }.chunked(MAX_OPS)
+                            .forEach { resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(it)) }
                         -1L
                     }
                     onDone(batch, listOf(newId))
@@ -281,8 +325,22 @@ class DeviceSource(
             }
             val list = ArrayList<ContentProviderOperation>()
             val starts = ArrayList<Int>()
-            for (p in batch) { starts += list.size; list += p.build(list.size) }
+            val refs = HashMap<Pair<AccountKey, String>, GroupRef>()
             try {
+                // each missing (account, title) once per batch, at its start; re-read so a group
+                // made by an earlier batch is reused
+                val needs = batch.flatMap { p -> p.newGroups.map { p.account to it } }.toCollection(LinkedHashSet())
+                if (needs.isNotEmpty()) {
+                    val existing = queryGroups()
+                    for (n in needs) {
+                        val id = groupIdsFor(existing, n.first.type, n.first.name)[n.second]
+                        refs[n] = if (id != null) GroupRef.Id(id) else GroupRef.Ref(list.size).also { list += groupInsert(n.first, n.second) }
+                    }
+                }
+                for (p in batch) {
+                    starts += list.size
+                    list += p.build(list.size) { refs.getValue(p.account to it) }
+                }
                 val r = resolver.applyBatch(ContactsContract.AUTHORITY, list)
                 onDone(batch, starts.map { r[it].uri?.let(ContentUris::parseId) ?: -1L })
             } catch (e: Exception) {
@@ -294,6 +352,7 @@ class DeviceSource(
 
     private fun opsFor(
         rawId: Long?, rawRef: Int, row: RowOp, yieldHere: Boolean, mimeOf: Map<Long, String> = emptyMap(),
+        group: (String) -> GroupRef = { error("no group ref for $it") },
     ): ContentProviderOperation {
         fun ContentProviderOperation.Builder.put(mime: String, values: Map<String, String?>, blob: ByteArray?) = apply {
             for ((k, v) in values) {
@@ -310,6 +369,14 @@ class DeviceSource(
             is RowOp.Update -> ContentProviderOperation.newUpdate(ContentUris.withAppendedId(Data.CONTENT_URI, row.id))
                 .put(mimeOf[row.id].orEmpty(), row.values, row.blob)
             is RowOp.Delete -> ContentProviderOperation.newDelete(ContentUris.withAppendedId(Data.CONTENT_URI, row.id))
+            is RowOp.JoinNewGroup -> ContentProviderOperation.newInsert(Data.CONTENT_URI).apply {
+                if (rawId != null) withValue(Data.RAW_CONTACT_ID, rawId) else withValueBackReference(Data.RAW_CONTACT_ID, rawRef)
+                withValue(Data.MIMETYPE, GroupMembership.CONTENT_ITEM_TYPE)
+                when (val g = group(row.title)) {
+                    is GroupRef.Id -> withValue(GroupMembership.GROUP_ROW_ID, g.id)
+                    is GroupRef.Ref -> withValueBackReference(GroupMembership.GROUP_ROW_ID, g.index)
+                }
+            }
         }
         return b.withYieldAllowed(yieldHere).build()
     }
@@ -318,10 +385,13 @@ class DeviceSource(
         is RowOp.Insert -> row.blob?.size ?: 0
         is RowOp.Update -> blob?.size ?: 0
         is RowOp.Delete -> 0
+        is RowOp.JoinNewGroup -> 0
     }
 
     private sealed interface Prep {
-        class Ops(val rawId: Long, val ops: List<RowOp>, val mimeOf: Map<Long, String>) : Prep
+        class Ops(val rawId: Long, val account: AccountKey, val ops: List<RowOp>, val mimeOf: Map<Long, String>) : Prep {
+            val newGroups = ops.filterIsInstance<RowOp.JoinNewGroup>().mapTo(LinkedHashSet()) { it.title }
+        }
         object ReadOnly : Prep
         class Fail(val why: String) : Prep
     }
@@ -338,7 +408,7 @@ class DeviceSource(
         val photoRow = rows.firstOrNull { it.mimetype == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE }
         val current = if (c.photo != null) readDisplayPhoto(rawId) ?: photoRow?.blob else null
         val mimeOf = rows.mapNotNull { r -> r.id?.let { it to r.mimetype } }.toMap()
-        return Prep.Ops(rawId, DeviceMapper.diff(rows, c, groupIdsFor(groups, raw.type, raw.name), current), mimeOf)
+        return Prep.Ops(rawId, accountKey(raw.type, raw.name), DeviceMapper.diff(rows, c, groupIdsFor(groups, raw.type, raw.name), current), mimeOf)
     }
 
     private fun prepareFresh(c: Contact): Prep {
@@ -346,7 +416,8 @@ class DeviceSource(
         return prepare(c, rawsById(listOf(rawId))[rawId], queryData(listOf(rawId))[rawId].orEmpty(), queryGroups())
     }
 
-    private fun updateOps(p: Prep.Ops) = p.ops.mapIndexed { i, op -> opsFor(p.rawId, 0, op, i == 0, p.mimeOf) }
+    private fun updateOps(p: Prep.Ops, group: (String) -> GroupRef) =
+        p.ops.mapIndexed { i, op -> opsFor(p.rawId, 0, op, i == 0, p.mimeOf, group) }
 
     override suspend fun update(cs: List<Contact>, onProgress: (Int) -> Unit): WriteResult = withContext(io) {
         val res = Results(onProgress)
@@ -358,7 +429,9 @@ class DeviceSource(
                     is Prep.Fail -> res.fail(c.id, p.why)
                     Prep.ReadOnly -> res.skip(c.id)
                     is Prep.Ops -> {
-                        if (p.ops.isNotEmpty()) updateOps(p).chunked(MAX_OPS).forEach {
+                        // GroupCreateFailed carries the "group X could not be created in Y" message
+                        val gids = ensureGroups(p.account, p.newGroups)
+                        if (p.ops.isNotEmpty()) updateOps(p) { GroupRef.Id(gids.getValue(it)) }.chunked(MAX_OPS).forEach {
                             resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(it))
                         }
                         res.ok(c.id)
@@ -371,10 +444,9 @@ class DeviceSource(
         }
         val batcher = Batcher(
             onDone = { batch, _ -> batch.forEach { res.ok(it.key) } },
-            onBatchFailed = { batch, e ->
-                if (batch.size == 1) res.fail(batch[0].key, e.message ?: e.javaClass.simpleName)
-                else batch.forEach { applySingly(byKey.getValue(it.key), e) }
-            },
+            // every contact is re-diffed against fresh state and applied alone, which also tells a
+            // group that can't be created apart from other errors
+            onBatchFailed = { batch, e -> batch.forEach { applySingly(byKey.getValue(it.key), e) } },
         )
         // contacts already known to be in a read-only account are skipped without touching the provider
         val (readOnly, writable) = cs.partition { it.account?.readOnly == true }
@@ -396,7 +468,11 @@ class DeviceSource(
                         Prep.ReadOnly -> res.skip(c.id)
                         is Prep.Ops -> if (p.ops.isEmpty()) res.ok(c.id) else {
                             byKey[c.id] = c
-                            batcher.add(Pending(c.id, p.ops.size, p.ops.sumOf { it.bytes() }) { _ -> updateOps(p) })
+                            batcher.add(
+                                Pending(c.id, p.ops.size + p.newGroups.size, p.ops.sumOf { it.bytes() }, p.account, p.newGroups) { _, g ->
+                                    updateOps(p, g)
+                                },
+                            )
                         }
                     }
                 }
@@ -421,8 +497,9 @@ class DeviceSource(
                 cs.indices.forEach { res.skip(key(it)) }
                 return@withContext res.result()
             }
-            val type = target?.type?.ifEmpty { null }
-            val name = target?.name?.ifEmpty { null }
+            val acct = accountKey(target?.type, target?.name)
+            val type = acct.type
+            val name = acct.name
             val groupIds = groupIdsFor(queryGroups(), type, name)
             val batcher = Batcher(
                 onDone = { batch, ids ->
@@ -434,7 +511,16 @@ class DeviceSource(
                 onBatchFailed = { batch, e ->
                     val why = (e.message ?: e.javaClass.simpleName) +
                         if (batch.size > 1) " (batch failed; check for partially created contacts)" else ""
-                    batch.forEach { res.fail(it.key, why) }
+                    // tell "the group can't be created here" apart: try each needed group on its own
+                    val groupErrors = HashMap<String, String>()
+                    for (t in batch.flatMap { it.newGroups }.toSet()) {
+                        try {
+                            ensureGroups(acct, setOf(t))
+                        } catch (g: GroupCreateFailed) {
+                            groupErrors[t] = g.message.orEmpty()
+                        }
+                    }
+                    batch.forEach { p -> res.fail(p.key, p.newGroups.firstNotNullOfOrNull { groupErrors[it] } ?: why) }
                 },
             )
             fun rawInsert() = ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
@@ -443,18 +529,19 @@ class DeviceSource(
                 .withYieldAllowed(true).build()
             cs.forEachIndexed { i, c ->
                 val rows = DeviceMapper.diff(emptyList(), c.copy(photo = c.photo ?: c.thumbnail), groupIds)
+                val newGroups = rows.filterIsInstance<RowOp.JoinNewGroup>().mapTo(LinkedHashSet()) { it.title }
                 // too big for one batch: create the raw contact first, then add rows by its literal id
-                val alone = {
+                val alone = { gids: Map<String, Long> ->
                     val r = resolver.applyBatch(ContactsContract.AUTHORITY, arrayListOf(rawInsert()))
                     val newId = ContentUris.parseId(requireNotNull(r[0].uri))
-                    rows.map { opsFor(newId, 0, it, false) }.chunked(MAX_OPS).forEach {
+                    rows.map { opsFor(newId, 0, it, false) { t -> GroupRef.Id(gids.getValue(t)) } }.chunked(MAX_OPS).forEach {
                         resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(it))
                     }
                     newId
                 }
                 batcher.add(
-                    Pending(key(i), rows.size + 1, rows.sumOf { it.bytes() }, alone) { base ->
-                        listOf(rawInsert()) + rows.map { opsFor(null, base, it, false) }
+                    Pending(key(i), rows.size + 1 + newGroups.size, rows.sumOf { it.bytes() }, acct, newGroups, alone) { base, g ->
+                        listOf(rawInsert()) + rows.map { opsFor(null, base, it, false, group = g) }
                     },
                 )
             }
@@ -487,7 +574,7 @@ class DeviceSource(
                 raw == null -> res.fail(id, "contact not found")
                 raw.deleted -> res.ok(id)
                 accounts.tag(raw.type, raw.name).readOnly -> res.skip(id)
-                else -> batcher.add(Pending(id, 1, 0) { listOf(op(raw.id)) })
+                else -> batcher.add(Pending(id, 1, 0) { _, _ -> listOf(op(raw.id)) })
             }
         }
         batcher.flush()
@@ -499,5 +586,7 @@ class DeviceSource(
         /** Keep each applyBatch well under the 1 MB binder transaction limit when photos are written. */
         const val MAX_BATCH_BYTES = 512 * 1024
         const val QUERY_CHUNK = 400
+        /** Row order matters to the mapper ("first" Organization row, positional pairing). */
+        const val DATA_ORDER = "${Data.RAW_CONTACT_ID} ASC, ${Data._ID} ASC"
     }
 }

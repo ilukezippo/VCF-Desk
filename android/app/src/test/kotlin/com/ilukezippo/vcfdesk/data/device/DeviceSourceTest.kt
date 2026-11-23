@@ -179,6 +179,89 @@ class DeviceSourceTest {
         assertEquals("a", src.load(a.toString()).notes)
     }
 
+    private fun membershipsOf(id: Long) = fake.rowsOf(id)
+        .filter { it.mimetype == ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE }
+        .map { fake.groups.getValue(it.values["data1"].toString().toLong()) }
+
+    @Test
+    fun addToNewGroupCreatesOneGroupPerAccount() = runTest {
+        val local = (1..3).map { person(it) }
+        val google = (4..5).map { person(it, "com.google") }
+        val src = source(this)
+        val all = (local + google).map { src.load(it.toString()) }
+        val r = src.update(all.map { it.copy(groups = setOf("Friends")) })
+        assertEquals((local + google).map { it.toString() }, r.written)
+        assertEquals(emptyMap<String, String>(), r.failed)
+        val friends = fake.groups.values.filter { it.title == "Friends" }
+        assertEquals(2, friends.size)
+        assertTrue(friends.all { it.visible })
+        assertEquals(setOf(null, "com.google"), friends.map { it.type }.toSet())
+        for (id in local) assertEquals(listOf<String?>(null), membershipsOf(id).map { it.type })
+        for (id in google) assertEquals(listOf<String?>("com.google"), membershipsOf(id).map { it.type })
+        // group and memberships land in the same batch
+        assertEquals(1, fake.batches.size)
+        assertEquals("Friends", src.load(local[0].toString()).groups.single())
+    }
+
+    @Test
+    fun newGroupIsCreatedOnceAcrossBatches() = runTest {
+        val ids = (1..250).map { person(it) }
+        val src = source(this)
+        val edited = ids.map { src.load(it.toString()) }.map { c ->
+            c.copy(groups = setOf("Friends"), phones = listOf(c.phones[0].copy(value = c.phones[0].value + "0")))
+        }
+        val r = src.update(edited)
+        assertEquals(250, r.written.size)
+        assertEquals(2, fake.batches.size)
+        assertEquals(1, fake.groups.values.count { it.title == "Friends" })
+        for (id in ids) assertEquals(listOf("Friends"), membershipsOf(id).map { it.title })
+    }
+
+    @Test
+    fun groupThatCannotBeCreatedFailsTheContact() = runTest {
+        val a = person(1); val b = person(2)
+        val src = source(this)
+        val ca = src.load(a.toString()); val cb = src.load(b.toString())
+        fake.failGroupInsert = true
+        val r = src.update(listOf(ca.copy(groups = setOf("Friends")), cb.copy(notes = "b")))
+        assertEquals(listOf(b.toString()), r.written)
+        assertEquals("group Friends could not be created in Phone", r.failed[a.toString()])
+        assertTrue(membershipsOf(a).isEmpty())
+        assertEquals("b", src.load(b.toString()).notes)
+
+        val created = src.create(listOf(Contact(id = "x", name = Name(display = "Name 3"), groups = setOf("Friends"))), null)
+        assertEquals(emptyList<String>(), created.written)
+        assertEquals("group Friends could not be created in Phone", created.failed["x"])
+    }
+
+    @Test
+    fun createAddsToNewGroupInTheTargetAccount() = runTest {
+        val src = source(this)
+        val g = AccountTag("com.google", "me@example.com", "Google", false)
+        val r = src.create((1..3).map { Contact(name = Name(display = "Name $it"), groups = setOf("Imported")) }, g)
+        assertEquals(3, r.written.size)
+        val imported = fake.groups.values.single { it.title == "Imported" }
+        assertEquals("com.google", imported.type); assertEquals("me@example.com", imported.name)
+        for (id in r.written) assertEquals(listOf(imported.id), membershipsOf(id.toLong()).map { it.id })
+    }
+
+    @Test
+    fun editLandsOnLowestIdRowWhateverOrderTheProviderReturns() = runTest {
+        val id = fake.addRaw()
+        val first = fake.addRow(id, Organization.CONTENT_ITEM_TYPE, "data1" to "First")
+        val second = fake.addRow(id, Organization.CONTENT_ITEM_TYPE, "data1" to "Second")
+        fake.reverseWhenUnsorted = true
+        val src = source(this)
+        val c = src.load(id.toString())
+        assertEquals("First", c.org.company)
+        src.update(listOf(c.copy(org = c.org.copy(company = "Edited"))))
+        assertEquals("Edited", fake.data.getValue(first).values["data1"])
+        assertEquals("Second", fake.data.getValue(second).values["data1"])
+        val dataQueries = fake.calls.filter { it.startsWith("query data") }
+        assertTrue(dataQueries.isNotEmpty())
+        assertTrue(dataQueries.toString(), dataQueries.all { it.endsWith("order=raw_contact_id ASC, _id ASC") })
+    }
+
     @Test
     fun contactChangedOnPhoneSinceReadIsNotOverwritten() = runTest {
         val id = person(1)

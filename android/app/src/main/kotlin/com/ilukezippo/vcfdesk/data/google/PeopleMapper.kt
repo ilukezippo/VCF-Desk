@@ -82,6 +82,21 @@ object PeopleMapper {
     private fun JsonObject.s(k: String): String = (this[k] as? JsonPrimitive)?.contentOrNull.orEmpty()
     private fun JsonObject.list(k: String): List<JsonObject> = (this[k] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
     private fun JsonObject.obj(k: String): JsonObject? = this[k] as? JsonObject
+    /**
+     * Entries the user's own contact holds. With READ_SOURCE_TYPE_CONTACT Google sends only these,
+     * but entries from another source (e.g. the person's PROFILE) are read-only and ignored by
+     * updates, so they are never shown as editable; on write they are sent back unchanged.
+     */
+    private fun isOwn(e: JsonObject): Boolean {
+        val t = (e.obj("metadata")?.obj("source")?.get("type") as? JsonPrimitive)?.contentOrNull
+        return t.isNullOrEmpty() || t == "CONTACT"
+    }
+    private fun JsonObject.own(k: String) = list(k).filter(::isOwn)
+    private fun JsonObject.foreign(k: String) = list(k).filterNot(::isOwn)
+
+    /** True when the entry belongs to the contact itself (not to a profile or other read-only source). */
+    fun isContactSourced(e: JsonObject) = isOwn(e)
+
     private fun isPrimary(e: JsonObject) = e.obj("metadata")?.get("primary")?.let { (it as? JsonPrimitive)?.booleanOrNull } == true
 
     /** Index of the entry the model reads (the primary one, else the first). */
@@ -141,12 +156,12 @@ object PeopleMapper {
     // ---- reading ----
 
     private fun readName(p: JsonObject): Name {
-        val names = p.list("names")
+        val names = p.own("names")
         val n = names.getOrNull(primaryIndex(names)) ?: JsonObject(emptyMap())
         return Name(
             prefix = n.s("honorificPrefix"), first = n.s("givenName"), middle = n.s("middleName"), last = n.s("familyName"),
             suffix = n.s("honorificSuffix"), phoneticFirst = n.s("phoneticGivenName"), phoneticLast = n.s("phoneticFamilyName"),
-            nickname = p.list("nicknames").firstOrNull()?.s("value").orEmpty(),
+            nickname = p.own("nicknames").firstOrNull()?.s("value").orEmpty(),
             display = n.s("displayName").ifEmpty { n.s("unstructuredName") },
         )
     }
@@ -170,7 +185,7 @@ object PeopleMapper {
         )
     }
 
-    private fun orgEntries(p: JsonObject) = p.list("organizations")
+    private fun orgEntries(p: JsonObject) = p.own("organizations")
 
     private fun readOrg(p: JsonObject): Org {
         val orgs = orgEntries(p)
@@ -191,15 +206,15 @@ object PeopleMapper {
         id = person.s("resourceName"),
         etag = person.s("etag").ifEmpty { null },
         name = readName(person),
-        phones = person.list("phoneNumbers").map(::readPhone),
-        emails = person.list("emailAddresses").map(::readEmail),
-        addresses = person.list("addresses").map(::readAddress),
+        phones = person.own("phoneNumbers").map(::readPhone),
+        emails = person.own("emailAddresses").map(::readEmail),
+        addresses = person.own("addresses").map(::readAddress),
         org = readOrg(person),
-        websites = person.list("urls").map(::readUrl),
-        events = person.list("birthdays").map(::readBirthday) + person.list("events").map(::readEvent),
-        relations = person.list("relations").map(::readRelation),
-        ims = person.list("imClients").map(::readIm),
-        notes = person.list("biographies").firstOrNull()?.s("value").orEmpty(),
+        websites = person.own("urls").map(::readUrl),
+        events = person.own("birthdays").map(::readBirthday) + person.own("events").map(::readEvent),
+        relations = person.own("relations").map(::readRelation),
+        ims = person.own("imClients").map(::readIm),
+        notes = person.own("biographies").firstOrNull()?.s("value").orEmpty(),
         groups = readGroups(person, groupNames),
         extras = listOf(Extra(EXTRA_KIND, person.toString())),
     )
@@ -321,7 +336,8 @@ object PeopleMapper {
         val before = orig?.let { toContact(it, groupIds.entries.associate { (k, v) -> v to k }) } ?: Contact()
         val changed = changedFields(before, c)
         val out = LinkedHashMap<String, JsonElement>(p)
-        fun set(k: String, list: List<JsonObject>) {
+        fun set(k: String, own: List<JsonObject>) {
+            val list = own + p.foreign(k)
             if (list.isEmpty() && orig == null) out.remove(k) else out[k] = JsonArray(list)
         }
 
@@ -329,7 +345,7 @@ object PeopleMapper {
         if (c.etag != null) out["etag"] = JsonPrimitive(c.etag) else if (orig == null) out.remove("etag")
 
         if ("names" in changed) {
-            val names = p.list("names").toMutableList()
+            val names = p.own("names").toMutableList()
             val i = primaryIndex(names)
             val n = c.name
             val e = edit(names.getOrNull(i)) {
@@ -346,7 +362,7 @@ object PeopleMapper {
             set("names", names)
         }
         if ("nicknames" in changed) {
-            val nicks = p.list("nicknames").toMutableList()
+            val nicks = p.own("nicknames").toMutableList()
             val nick = c.name.nickname
             if (nick.isEmpty()) { if (nicks.isNotEmpty()) nicks.removeAt(0) }
             else if (nicks.isEmpty()) nicks += edit(null) { put("value", nick) }
@@ -354,15 +370,15 @@ object PeopleMapper {
             set("nicknames", nicks)
         }
         if ("phoneNumbers" in changed) {
-            set("phoneNumbers", merge(p.list("phoneNumbers"), before.phones, c.phones, { digits(it.value) }, { it.value.isBlank() }, ::writePhone))
+            set("phoneNumbers", merge(p.own("phoneNumbers"), before.phones, c.phones, { digits(it.value) }, { it.value.isBlank() }, ::writePhone))
         }
         if ("emailAddresses" in changed) {
-            set("emailAddresses", merge(p.list("emailAddresses"), before.emails, c.emails, { it.value.trim().lowercase() }, { it.value.isBlank() }, ::writeEmail))
+            set("emailAddresses", merge(p.own("emailAddresses"), before.emails, c.emails, { it.value.trim().lowercase() }, { it.value.isBlank() }, ::writeEmail))
         }
         if ("addresses" in changed) {
             set(
                 "addresses",
-                merge(p.list("addresses"), before.addresses, c.addresses, { it.parts().joinToString("\u0000") }, { a -> a.parts().all { it.isBlank() } }, ::writeAddress),
+                merge(p.own("addresses"), before.addresses, c.addresses, { it.parts().joinToString("\u0000") }, { a -> a.parts().all { it.isBlank() } }, ::writeAddress),
             )
         }
         if ("organizations" in changed) {
@@ -377,28 +393,28 @@ object PeopleMapper {
             set("organizations", orgs)
         }
         if ("urls" in changed) {
-            set("urls", merge(p.list("urls"), before.websites, c.websites, { it.value.trim() }, { it.value.isBlank() }, ::writeUrl))
+            set("urls", merge(p.own("urls"), before.websites, c.websites, { it.value.trim() }, { it.value.isBlank() }, ::writeUrl))
         }
         if ("birthdays" in changed) {
             set(
                 "birthdays",
-                merge(p.list("birthdays"), before.events.filter(::isBirthday), c.events.filter(::isBirthday), { it.value }, { it.value.isBlank() }, ::writeBirthday),
+                merge(p.own("birthdays"), before.events.filter(::isBirthday), c.events.filter(::isBirthday), { it.value }, { it.value.isBlank() }, ::writeBirthday),
             )
         }
         if ("events" in changed) {
             set(
                 "events",
-                merge(p.list("events"), before.events.filterNot(::isBirthday), c.events.filterNot(::isBirthday), { it.value }, { it.value.isBlank() }, ::writeEvent),
+                merge(p.own("events"), before.events.filterNot(::isBirthday), c.events.filterNot(::isBirthday), { it.value }, { it.value.isBlank() }, ::writeEvent),
             )
         }
         if ("relations" in changed) {
-            set("relations", merge(p.list("relations"), before.relations, c.relations, { it.value.trim() }, { it.value.isBlank() }, ::writeRelation))
+            set("relations", merge(p.own("relations"), before.relations, c.relations, { it.value.trim() }, { it.value.isBlank() }, ::writeRelation))
         }
         if ("imClients" in changed) {
-            set("imClients", merge(p.list("imClients"), before.ims, c.ims, { it.value.trim() }, { it.value.isBlank() }, ::writeIm))
+            set("imClients", merge(p.own("imClients"), before.ims, c.ims, { it.value.trim() }, { it.value.isBlank() }, ::writeIm))
         }
         if ("biographies" in changed) {
-            val bios = p.list("biographies").toMutableList()
+            val bios = p.own("biographies").toMutableList()
             if (c.notes.isEmpty()) { if (bios.isNotEmpty()) bios.removeAt(0) }
             else if (bios.isEmpty()) bios += edit(null) { put("value", c.notes); put("contentType", "TEXT_PLAIN") }
             else bios[0] = edit(bios[0]) { put("value", c.notes) }
@@ -414,7 +430,8 @@ object PeopleMapper {
                 val rn = groupIds[g] ?: throw IllegalArgumentException("no Google group named \"$g\"")
                 kept += existing.firstOrNull { membershipName(it) == rn } ?: membership(rn)
             }
-            set("memberships", kept.distinctBy { membershipName(it) ?: it.toString() })
+            // all of the original memberships were considered above, so none are appended again
+            out["memberships"] = JsonArray(kept.distinctBy { membershipName(it) ?: it.toString() })
         }
         return JsonObject(out)
     }

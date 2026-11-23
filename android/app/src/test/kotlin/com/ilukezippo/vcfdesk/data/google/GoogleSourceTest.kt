@@ -185,7 +185,7 @@ class GoogleSourceTest {
         routes["GET /v1/people/me/connections"] = {
             json("""{"connections":[${personJson(1, extra = ""","photos":[{"url":"${server.url("/img/p1.jpg")}"}]""")}]}""")
         }
-        routes["GET /img/p1.jpg"] = { MockResponse.Builder().body(okio.Buffer().write(photoBytes)).build() }
+        routes["GET /img/p1.jpg=s0"] = { MockResponse.Builder().body(okio.Buffer().write(photoBytes)).build() }
         source.refresh()
         val loaded = source.load("people/c1")
         assertArrayEquals(photoBytes, loaded.photo)
@@ -240,5 +240,50 @@ class GoogleSourceTest {
         val res = source.delete(listOf("people/c1", "people/c2", "people/c3"))
         assertEquals(listOf("people/c1", "people/c2"), res.written)
         assertEquals(setOf("people/c3"), res.failed.keys)
+    }
+
+    @Test
+    fun loadFetchesFullSizePhotoFromContactSource() = runTest {
+        val big = byteArrayOf(7, 7, 7)
+        routes["GET /v1/people/me/connections"] = {
+            val p1 = personJson(
+                1,
+                extra = ""","photos":[{"metadata":{"source":{"type":"PROFILE"}},"url":"${server.url("/img/profile=s100")}"},
+                                       {"metadata":{"source":{"type":"CONTACT"}},"url":"${server.url("/img/c1=s100")}"}]""",
+            )
+            val p2 = personJson(2, extra = ""","photos":[{"url":"${server.url("/img/c2")}"}]""")
+            val p3 = personJson(3, extra = ""","photos":[{"url":"${server.url("/img/c3=s96-c")}"}]""")
+            json("""{"connections":[$p1,$p2,$p3]}""")
+        }
+        for (path in listOf("/img/c1=s0", "/img/c2=s0", "/img/c3=s0")) {
+            routes["GET $path"] = { MockResponse.Builder().body(okio.Buffer().write(big)).build() }
+        }
+        source.refresh()
+        assertArrayEquals(big, source.load("people/c1").photo)
+        assertArrayEquals(big, source.load("people/c2").photo)
+        assertArrayEquals(big, source.load("people/c3").photo)
+        val fetched = requests.map { it.first.url.encodedPath }.filter { it.startsWith("/img/") }
+        assertEquals(listOf("/img/c1=s0", "/img/c2=s0", "/img/c3=s0"), fetched)
+        assertTrue(calls("GET /v1/people/me/connections").all { it.first.url.queryParameter("sources") == "READ_SOURCE_TYPE_CONTACT" })
+    }
+
+    @Test
+    fun chunkLevelEtagFailureFailsOnlyTheStaleContact() = runTest {
+        val stale = "Request person.etag is different than the current person.etag."
+        routes["POST /v1/people:batchUpdateContacts"] = {
+            json("""{"error":{"code":400,"message":"$stale","status":"FAILED_PRECONDITION"}}""", 400)
+        }
+        for (n in 1..3) {
+            routes["PATCH /v1/people/c$n:updateContact"] = { b ->
+                if (n == 2) json("""{"error":{"code":400,"message":"$stale","status":"FAILED_PRECONDITION"}}""", 400)
+                else json(JsonObject(b!! + ("etag" to kotlinx.serialization.json.JsonPrimitive("fresh$n"))).toString())
+            }
+        }
+        val list = source.contacts().first()
+        val res = source.update(list.map { it.copy(org = it.org.copy(title = "Manager")) })
+        assertEquals(listOf("people/c1", "people/c3"), res.written.sorted())
+        assertEquals(setOf("people/c2"), res.failed.keys)
+        assertTrue(res.failed.getValue("people/c2").contains("reload", ignoreCase = true))
+        assertEquals("fresh1", source.contacts().first().first { it.id == "people/c1" }.etag)
     }
 }

@@ -28,16 +28,26 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
+/** Only the user's own contact data: profile data is read-only and ignored by updates. */
+const val READ_SOURCES = "READ_SOURCE_TYPE_CONTACT"
+
 const val PERSON_FIELDS = "names,nicknames,phoneNumbers,emailAddresses,addresses,organizations,urls,birthdays,events,relations,imClients,biographies,memberships,photos,metadata"
 
 /**
  * A People API failure with a readable [message]. [httpCode] is the HTTP status (0 for network
  * errors); [status] is the Google RPC status name or code when the server gave one.
  */
-class PeopleApiException(message: String, val httpCode: Int, val status: String? = null, cause: Throwable? = null) :
-    IOException(message, cause) {
+class PeopleApiException(
+    message: String,
+    val httpCode: Int,
+    val status: String? = null,
+    cause: Throwable? = null,
+    /** Google's own error message, if any. */
+    val serverMessage: String? = null,
+) : IOException(message, cause) {
     /** The person changed on Google since it was read (stale etag). */
-    val etagMismatch: Boolean get() = status == "FAILED_PRECONDITION" || status == "9"
+    val etagMismatch: Boolean get() = status == "FAILED_PRECONDITION" || status == "9" ||
+        (httpCode == 400 && serverMessage?.contains("etag", ignoreCase = true) == true)
     val notFound: Boolean get() = httpCode == 404 || status == "NOT_FOUND" || status == "5"
 }
 
@@ -61,6 +71,7 @@ class PeopleApi(
         val url = url("people/me/connections") {
             addQueryParameter("pageSize", "1000")
             addQueryParameter("personFields", PERSON_FIELDS)
+            addQueryParameter("sources", READ_SOURCES)
             addQueryParameter("sortOrder", "FIRST_NAME_ASCENDING")
             if (pageToken != null) addQueryParameter("pageToken", pageToken)
         }
@@ -100,11 +111,17 @@ class PeopleApi(
                 put("contacts", JsonObject(chunk.associate { it.key to it.value }))
                 put("updateMask", updateMask)
                 put("readMask", PERSON_FIELDS)
+                put("sources", JsonArray(listOf(JsonPrimitive(READ_SOURCES))))
             }
             val r = try {
                 call("POST", url("people:batchUpdateContacts"), body)
             } catch (e: PeopleApiException) {
-                chunk.forEach { out[it.key] = Result.failure(e) }
+                if (e.httpCode == 400 && e.etagMismatch) {
+                    // the whole call was refused for a stale etag: find out which, one contact at a time
+                    for ((rn, p) in chunk) out[rn] = updateOne(rn, p, updateMask)
+                } else {
+                    chunk.forEach { out[it.key] = Result.failure(e) }
+                }
                 continue
             }
             val results = r["updateResult"] as? JsonObject ?: JsonObject(emptyMap())
@@ -117,6 +134,20 @@ class PeopleApi(
         return out
     }
 
+    /** Updates one person (`people/…:updateContact`); a failure is returned, not thrown. */
+    private suspend fun updateOne(resourceName: String, person: JsonObject, updateMask: String): Result<JsonObject> {
+        val url = url("$resourceName:updateContact") {
+            addQueryParameter("updatePersonFields", updateMask)
+            addQueryParameter("personFields", PERSON_FIELDS)
+            addQueryParameter("sources", READ_SOURCES)
+        }
+        return try {
+            Result.success(call("PATCH", url, person))
+        } catch (e: PeopleApiException) {
+            Result.failure(e)
+        }
+    }
+
     /** Creates [people] in calls of at most [MAX_CREATE]; results are in input order. */
     suspend fun batchCreate(people: List<JsonObject>): List<Result<JsonObject>> {
         val out = ArrayList<Result<JsonObject>>(people.size)
@@ -124,6 +155,7 @@ class PeopleApi(
             val body = buildJsonObject {
                 put("contacts", JsonArray(chunk.map { JsonObject(mapOf("contactPerson" to it)) }))
                 put("readMask", PERSON_FIELDS)
+                put("sources", JsonArray(listOf(JsonPrimitive(READ_SOURCES))))
             }
             val r = try {
                 call("POST", url("people:batchCreateContacts"), body)
@@ -154,6 +186,7 @@ class PeopleApi(
         buildJsonObject {
             put("photoBytes", Base64.getEncoder().encodeToString(jpeg))
             put("personFields", "photos,metadata")
+            put("sources", JsonArray(listOf(JsonPrimitive(READ_SOURCES))))
         },
     )
 
@@ -228,7 +261,7 @@ class PeopleApi(
     private fun errorOf(code: Int, message: String?, status: String?): PeopleApiException {
         val detail = message?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
         val text = when {
-            status == "FAILED_PRECONDITION" || status == "9" ->
+            status == "FAILED_PRECONDITION" || status == "9" || (code == 400 && message?.contains("etag", ignoreCase = true) == true) ->
                 "changed in Google since it was read; reload and try again"
             code == 401 -> "Google sign-in expired or was revoked; sign in again"
             code == 403 -> "Google refused access$detail"
@@ -237,7 +270,7 @@ class PeopleApi(
             code >= 500 -> "Google server error (HTTP $code)$detail"
             else -> "Google rejected the request (HTTP $code)$detail"
         }
-        return PeopleApiException(text, code, status)
+        return PeopleApiException(text, code, status, serverMessage = message)
     }
 
     private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->

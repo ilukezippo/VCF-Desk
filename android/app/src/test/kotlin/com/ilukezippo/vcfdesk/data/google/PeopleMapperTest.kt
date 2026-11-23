@@ -200,4 +200,42 @@ class PeopleMapperTest {
         assertEquals("1990", d.str("year"))
         assertFalse(d.containsKey("month"))
     }
+
+    private val withProfile: JsonObject = JsonObject(
+        person + mapOf(
+            "names" to Json.parseToJsonElement(
+                """[{"metadata":{"primary":true,"source":{"type":"PROFILE","id":"p9"}},"givenName":"Profile Name","displayName":"Profile Name"},
+                   {"metadata":{"source":{"type":"CONTACT","id":"1"}},"givenName":"Name 1","displayName":"Name 1"}]""",
+            ),
+            "phoneNumbers" to Json.parseToJsonElement(
+                """[{"metadata":{"source":{"type":"PROFILE","id":"p9"}},"value":"99999999","type":"work"},
+                   {"metadata":{"source":{"type":"CONTACT","id":"1"}},"value":"55555555","type":"mobile"}]""",
+            ),
+        ),
+    )
+
+    @Test
+    fun profileEntriesAreNotExposed() {
+        val c = PeopleMapper.toContact(withProfile, groups)
+        assertEquals("Name 1", c.name.first)
+        assertEquals(listOf(Typed("Mobile", "55555555")), c.phones)
+    }
+
+    @Test
+    fun editingContactEntriesSendsProfileEntriesBackUnchanged() {
+        val c = PeopleMapper.toContact(withProfile, groups)
+        val out = PeopleMapper.toPerson(
+            c.copy(name = c.name.copy(first = "Name 2"), phones = listOf(Typed("Mobile", "66666666"))),
+            groupIds,
+        )
+        val names = out.arr("names")
+        assertEquals(2, names.size)
+        assertEquals("Name 2", names[0].jsonObject.str("givenName"))
+        assertEquals(withProfile.arr("names")[0], names[1])
+        val phones = out.arr("phoneNumbers")
+        assertEquals(listOf("66666666", "99999999"), phones.map { it.jsonObject.str("value") })
+        assertEquals(withProfile.arr("phoneNumbers")[0], phones[1])
+        // unchanged fields stay byte-identical, profile entries included
+        assertEquals(withProfile, PeopleMapper.toPerson(c, groupIds))
+    }
 }

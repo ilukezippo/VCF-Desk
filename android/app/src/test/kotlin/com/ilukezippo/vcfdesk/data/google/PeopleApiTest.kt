@@ -53,6 +53,7 @@ class PeopleApiTest {
         assertEquals("/v1/people/me/connections", first.url.encodedPath)
         assertEquals("1000", first.url.queryParameter("pageSize"))
         assertEquals(PERSON_FIELDS, first.url.queryParameter("personFields"))
+        assertEquals("READ_SOURCE_TYPE_CONTACT", first.url.queryParameter("sources"))
         assertNull(first.url.queryParameter("pageToken"))
         assertEquals("p2", server.takeRequest().url.queryParameter("pageToken"))
         assertEquals("p3", server.takeRequest().url.queryParameter("pageToken"))
@@ -80,6 +81,7 @@ class PeopleApiTest {
         assertEquals("organizations", body.getValue("updateMask").jsonPrimitive.content)
         assertEquals(200, body.getValue("contacts").jsonObject.size)
         assertTrue(body.containsKey("readMask"))
+        assertEquals("READ_SOURCE_TYPE_CONTACT", body.getValue("sources").jsonArray.single().jsonPrimitive.content)
     }
 
     @Test
@@ -175,5 +177,22 @@ class PeopleApiTest {
         val m = server.takeRequest()
         assertEquals("/v1/contactGroups/new1/members:modify", m.url.encodedPath)
         assertEquals("people/c1", Json.parseToJsonElement(m.body!!.utf8()).jsonObject.getValue("resourceNamesToAdd").jsonArray[0].jsonPrimitive.content)
+    }
+
+    @Test
+    fun chunkLevelEtagFailureRetriesOneByOne() = runTest {
+        server.enqueue(json("""{"error":{"code":400,"message":"Request person.etag is different than the current person.etag.","status":"FAILED_PRECONDITION"}}""", 400))
+        server.enqueue(json("""{"resourceName":"people/c1","etag":"n1"}"""))
+        server.enqueue(json("""{"error":{"code":400,"message":"Request person.etag is different than the current person.etag.","status":"FAILED_PRECONDITION"}}""", 400))
+        val res = api.batchUpdate(linkedMapOf("people/c1" to person(1), "people/c2" to person(2)), "names,urls")
+        assertEquals("n1", res.getValue("people/c1").getOrThrow().getValue("etag").jsonPrimitive.content)
+        assertTrue((res.getValue("people/c2").exceptionOrNull() as PeopleApiException).etagMismatch)
+        server.takeRequest()
+        val one = server.takeRequest()
+        assertEquals("PATCH", one.method)
+        assertEquals("/v1/people/c1:updateContact", one.url.encodedPath)
+        assertEquals("names,urls", one.url.queryParameter("updatePersonFields"))
+        assertEquals("READ_SOURCE_TYPE_CONTACT", one.url.queryParameter("sources"))
+        assertEquals("e1", Json.parseToJsonElement(one.body!!.utf8()).jsonObject.getValue("etag").jsonPrimitive.content)
     }
 }

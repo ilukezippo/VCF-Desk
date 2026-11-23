@@ -95,7 +95,7 @@ class GoogleSource(private val email: String, private val api: PeopleApi) : Cont
         val c = byId[id] ?: throw NoSuchElementException("no Google contact $id")
         val url = photoUrl(c) ?: return@withLock c
         val bytes = photos[id]?.takeIf { it.first == url }?.second ?: try {
-            api.fetchPhoto(url).also { photos[id] = url to it }
+            api.fetchPhoto(fullSize(url)).also { photos[id] = url to it }
         } catch (e: IOException) {
             // photo null means "not loaded / unchanged", so a failed download never removes a photo
             return@withLock c
@@ -111,7 +111,8 @@ class GoogleSource(private val email: String, private val api: PeopleApi) : Cont
     /** The contact's own (non-placeholder) photo URL, from the person as read. */
     private fun photoUrl(c: Contact): String? = PeopleMapper.original(c)?.let { p ->
         (p["photos"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-            .firstOrNull { (it["default"] as? JsonPrimitive)?.booleanOrNull != true }?.str("url")
+            .firstOrNull { PeopleMapper.isContactSourced(it) && (it["default"] as? JsonPrimitive)?.booleanOrNull != true }
+            ?.str("url")
     }
 
     // ---- writing ----
@@ -311,4 +312,15 @@ class GoogleSource(private val email: String, private val api: PeopleApi) : Cont
     }
 
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.contentOrNull
+
+    companion object {
+        private val SIZE_SUFFIX = Regex("=[swh]\\d+(-[A-Za-z0-9-]*)?$")
+
+        /**
+         * The full-size variant of a Google photo URL: `photos[].url` carries a size suffix
+         * (e.g. `=s100`) giving a ~100 px image, which must never become a contact's full photo.
+         */
+        fun fullSize(url: String): String =
+            if (SIZE_SUFFIX.containsMatchIn(url)) url.replace(SIZE_SUFFIX, "=s0") else "$url=s0"
+    }
 }

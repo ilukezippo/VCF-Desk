@@ -53,10 +53,23 @@ object Xlsx {
     }
 
     private fun parse(b: ByteArray): org.w3c.dom.Document {
+        // XXE protection must not depend on parser features (Android's parser rejects Xerces-only names):
+        // refuse any document with a DOCTYPE ourselves, and also make every entity resolve to nothing.
+        require(!hasDoctype(b)) { "XML with a DOCTYPE is not accepted" }
         val f = DocumentBuilderFactory.newInstance()
-        f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        f.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        return f.newDocumentBuilder().parse(ByteArrayInputStream(b))
+        for (feat in listOf("http://apache.org/xml/features/disallow-doctype-decl", "http://xml.org/sax/features/external-general-entities")) {
+            try { f.setFeature(feat, feat.contains("disallow")) } catch (_: Exception) {}
+        }
+        val builder = f.newDocumentBuilder()
+        builder.setEntityResolver { _, _ -> org.xml.sax.InputSource(java.io.StringReader("")) }
+        return builder.parse(ByteArrayInputStream(b))
+    }
+
+    private fun hasDoctype(b: ByteArray): Boolean {
+        // UTF-16 parts would not match a byte scan, so check the decoded text of both readings
+        val utf8 = String(b, Charsets.UTF_8)
+        if (utf8.contains("<!DOCTYPE", ignoreCase = true)) return true
+        return b.size > 1 && b.any { it == 0.toByte() } && String(b, Charsets.UTF_16).contains("<!DOCTYPE", ignoreCase = true)
     }
 
     private fun local(n: Node) = (n.nodeName).substringAfter(':')

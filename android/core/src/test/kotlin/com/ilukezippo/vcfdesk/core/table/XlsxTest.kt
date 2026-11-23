@@ -58,4 +58,14 @@ class XlsxTest {
         assertEquals(listOf("Name", "", "Phone"), t.headers)
         assertEquals(listOf("99999999", "TRUE", "1.5"), t.rows[0])
     }
+
+    @Test fun doctypeIsRejected() {
+        val wb = """<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="S1" sheetId="1"/></sheets></workbook>"""
+        val bos = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(bos).use { z ->
+            z.putNextEntry(java.util.zip.ZipEntry("xl/workbook.xml")); z.write(wb.toByteArray()); z.closeEntry()
+        }
+        val r = runCatching { Xlsx.sheets(bos.toByteArray()) }
+        assertTrue(r.isFailure)
+    }
 }

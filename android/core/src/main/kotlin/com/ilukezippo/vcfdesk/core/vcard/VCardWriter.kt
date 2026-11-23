@@ -97,8 +97,7 @@ object VCardWriter {
         x.lines.add("BEGIN:VCARD")
         x.lines.add("VERSION:" + when (ver) { VCardVersion.V21 -> "2.1"; VCardVersion.V30 -> "3.0"; VCardVersion.V40 -> "4.0" })
         val n = c.name
-        val composed = listOf(n.prefix, n.first, n.middle, n.last, n.suffix)
-            .map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
+        val composed = com.ilukezippo.vcfdesk.core.text.Names.compose(n)
         x.prop("FN", listOf(n.display.trim().ifEmpty { composed }.ifEmpty { c.org.company.trim() }))
         x.prop("N", listOf(n.last, n.first, n.middle, n.prefix, n.suffix))
         if (n.nickname.isNotBlank()) x.prop("NICKNAME", listOf(n.nickname))

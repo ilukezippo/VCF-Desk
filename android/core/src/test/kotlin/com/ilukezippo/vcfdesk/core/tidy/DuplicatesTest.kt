@@ -55,6 +55,12 @@ class DuplicatesTest {
         assertEquals(listOf(listOf("1", "4"), listOf("3", "5")), groups.map { g -> g.map { it.id } })
     }
 
+    @Test fun separatorsAndCountryCodeStillMatch() {
+        val a = c("1", "Name 8", phones = listOf("5555 5555"))
+        val b = c("2", "Name 8", phones = listOf("(5555) 5555"))
+        assertEquals(listOf(listOf("1", "2")), Duplicates.groups(listOf(a, b)).map { g -> g.map { it.id } })
+    }
+
     @Test fun keeperPrefersPhoto() {
         val withPhotoOnly = c("1", "Name 6", phones = listOf("55555555"), photo = byteArrayOf(1))
         val twoFields = c("2", "Name 6", phones = listOf("55555555"), emails = listOf("n6@example.com"))

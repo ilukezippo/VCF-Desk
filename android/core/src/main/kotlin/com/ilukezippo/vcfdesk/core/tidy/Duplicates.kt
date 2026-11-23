@@ -4,7 +4,6 @@ import com.ilukezippo.vcfdesk.core.model.AccountTag
 import com.ilukezippo.vcfdesk.core.model.Address
 import com.ilukezippo.vcfdesk.core.model.Contact
 import com.ilukezippo.vcfdesk.core.model.Typed
-import com.ilukezippo.vcfdesk.core.text.Phones
 
 /** Exact-duplicate finding, mirroring `duplicate_key` on desktop. */
 object Duplicates {
@@ -30,10 +29,12 @@ object Duplicates {
     private fun keyOf(c: Contact): Key = Key(
         account = c.account,
         name = c.name.display.trim().lowercase(),
-        phones = c.phones.map { it.value.trim() }.filter { it.isNotEmpty() }
-            .map { Phones.normalise(it, "") }.toSortedSet(),
+        phones = c.phones.map { phoneKey(it.value) }.filter { it.isNotEmpty() }.toSortedSet(),
         emails = c.emails.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.toSortedSet(),
     )
+
+    /** Digits only, last 9 kept: the same rule as `duplicate_key` on desktop. */
+    private fun phoneKey(v: String): String = v.filter { it in '0'..'9' }.takeLast(9)
 
     private fun filled(c: Contact): Int {
         val n = c.name

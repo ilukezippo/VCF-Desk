@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VCF Desk</string>
+    <string name="app_subtitle">Contacts Manager</string>
+    <string name="app_title_full">VCF Desk – Contacts Manager</string>
+</resources>

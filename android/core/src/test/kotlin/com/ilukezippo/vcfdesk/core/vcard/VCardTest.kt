@@ -39,7 +39,7 @@ class VCardTest {
         assertEquals("اسم2", c.name.last)
         assertEquals("اسم1", c.name.first)
         assertEquals("line one\nline two with a soft break", c.notes)
-        assertEquals(listOf(Typed("Mobile", "+96599999999")), c.phones)
+        assertEquals(listOf(Typed("Mobile", "+96599999999", true)), c.phones)
         assertEquals(
             listOf(Extra("vcard", "X-ANDROID-CUSTOM:vnd.android.cursor.item/nickname;Mo;1;;;;;;;;;;;;;")),
             c.extras,
@@ -49,7 +49,7 @@ class VCardTest {
     @Test
     fun iphoneItemLabels() {
         val c = VCardReader.read(iphone30).single()
-        assertEquals(listOf(Typed("Mobile", "55555555")), c.phones)
+        assertEquals(listOf(Typed("Mobile", "55555555", true)), c.phones)
         assertEquals(listOf(Typed("Home", "name@example.com")), c.emails)
         assertEquals("Street, 2", c.addresses.single().street)
         assertEquals("Home", c.addresses.single().label)
@@ -158,5 +158,60 @@ class VCardTest {
         val c = VCardReader.read("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nPHOTO;VALUE=URI:http://example.com/a.jpg\r\nEND:VCARD\r\n").single()
         assertEquals(null, c.photo)
         assertEquals(listOf(Extra("vcard", "PHOTO;VALUE=URI:http://example.com/a.jpg")), c.extras)
+    }
+
+    private val arabicLong = "xx" + "ا".repeat(12) + " tail " +
+        (1..30).joinToString(" ") { "كلمة$it" } + " " + "ب".repeat(40) + " "
+
+    @Test
+    fun v21QuotedPrintableKeepsSpacesAtSoftBreaks() {
+        for (text in listOf("xx" + "ا".repeat(12) + " tail", arabicLong, "a ".repeat(60), " lead" + " ".repeat(80) + "x")) {
+            assertEquals(text, QuotedPrintable.decode(VCardSyntax.logicalLines(
+                "NOTE;ENCODING=QUOTED-PRINTABLE:" + QuotedPrintable.encode(text)).single().substringAfter(':')))
+            val c = Contact(name = Name(display = "A"), notes = text)
+            val out = VCardWriter.write(listOf(c), VCardVersion.V21)
+            assertEquals(text, VCardReader.read(out).single().notes)
+        }
+    }
+
+    @Test
+    fun quotedPrintableExtraSurvivesNewerVersions() {
+        val raw = "X-ANDROID-CUSTOM;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:" + QuotedPrintable.encode(arabicLong)
+        val src = VCardReader.read("BEGIN:VCARD\r\nVERSION:2.1\r\nFN:A\r\n$raw\r\nEND:VCARD\r\n").single()
+        assertEquals(1, src.extras.size)
+        for (v in VCardVersion.values()) {
+            val back = VCardReader.read(VCardWriter.write(listOf(src), v)).single()
+            assertEquals(v.name, src.extras, back.extras)
+            // the stored line still decodes to the original text
+            val line = back.extras.single().raw
+            assertEquals(arabicLong, QuotedPrintable.decode(line.substringAfter(':')))
+        }
+    }
+
+    @Test
+    fun uneditedRoundTripKeepsPrefParamsAndStructure() {
+        val text = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Name\r\nN:;Name;;;\r\n" +
+            "ORG:Company;Department;Unit1;Unit2\r\n" +
+            "TEL;TYPE=CELL,PREF;LANGUAGE=ar:55555555\r\n" +
+            "EMAIL;TYPE=INTERNET,WORK:name@example.com\r\n" +
+            "ADR;TYPE=HOME,PREF;LABEL=\"Home, sweet\":Box 1;Apt 2;Street;City;Region;00000;Country\r\n" +
+            "URL;TYPE=WORK:https://example.com\r\n" +
+            "IMPP;X-SERVICE-TYPE=Signal:signal:name\r\n" +
+            "BDAY;X-APPLE-OMIT-YEAR=1604:1604-02-01\r\n" +
+            "END:VCARD\r\n"
+        val c = VCardReader.read(text).single()
+        assertEquals(Org("Company", "Department", "", listOf("Unit1", "Unit2")), c.org)
+        assertEquals(Typed("Mobile", "55555555", true, mapOf("LANGUAGE" to "ar")), c.phones.single())
+        val a = c.addresses.single()
+        assertEquals("Box 1", a.poBox)
+        assertEquals("Apt 2", a.extended)
+        assertEquals(true, a.pref)
+        assertEquals(mapOf("LABEL" to "\"Home, sweet\""), a.params)
+        assertEquals(Typed("Work", "https://example.com"), c.websites.single())
+        assertEquals(Typed("Signal", "signal:name", false, mapOf("X-SERVICE-TYPE" to "Signal")), c.ims.single())
+        assertEquals(Typed("birthday", "1604-02-01", false, mapOf("X-APPLE-OMIT-YEAR" to "1604")), c.events.single())
+        for (v in VCardVersion.values()) {
+            assertEquals(v.name, c, VCardReader.read(VCardWriter.write(listOf(c), v)).single())
+        }
     }
 }

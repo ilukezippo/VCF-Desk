@@ -41,9 +41,17 @@ object QuotedPrintable {
     fun encode(text: String): String {
         val lines = ArrayList<String>()
         val cur = StringBuilder()
-        for (b in text.replace("\r\n", "\n").replace("\n", "\r\n").toByteArray(Charsets.UTF_8)) {
+        val bytes = text.replace("\r\n", "\n").replace("\n", "\r\n").toByteArray(Charsets.UTF_8)
+        fun plain(v: Int) = (v in 33..126 && v != 61) || v == 32
+        fun tokenOf(v: Int) = if (plain(v)) v.toChar().toString() else "=%02X".format(v)
+        for ((i, b) in bytes.withIndex()) {
             val v = b.toInt() and 0xFF
-            val tok = if ((v in 33..126 && v != 61) || v == 32) v.toChar().toString() else "=%02X".format(v)
+            var tok = tokenOf(v)
+            if (v == 32) {
+                // A space at a line start, before a soft break or at the end would be eaten by readers.
+                val nextLen = if (i + 1 < bytes.size) (bytes[i + 1].toInt() and 0xFF).let { if (it == 32) 3 else tokenOf(it).length } else 0
+                if (cur.isEmpty() || cur.length + 1 > 74 || i + 1 == bytes.size || cur.length + 1 + nextLen > 74) tok = "=20"
+            }
             if (cur.length + tok.length > 74) {
                 lines.add("$cur=")
                 cur.setLength(0)

@@ -52,21 +52,32 @@ object VCardWriter {
         }
 
         /** A property whose label is either a standard TYPE set or a custom itemN.X-ABLabel. */
-        fun labelled(name: String, parts: List<String>, label: String, standardTypes: Map<String, List<String>>? = null) {
+        fun labelled(
+            name: String,
+            parts: List<String>,
+            label: String,
+            standardTypes: Map<String, List<String>>? = null,
+            pref: Boolean = false,
+            meta: Map<String, String> = emptyMap(),
+        ) {
+            val ps = meta.map { "${it.key}=${it.value}" }
+            val prefType = if (pref) listOf("PREF") else emptyList()
             val std = standardTypes?.get(label)
             if (std != null) {
-                prop(name, parts, types = if (ver == VCardVersion.V40) std - "INTERNET" else std)
+                prop(name, parts, types = (if (ver == VCardVersion.V40) std - "INTERNET" else std) + prefType, params = ps)
             } else if (label.isBlank()) {
-                prop(name, parts)
+                prop(name, parts, types = prefType, params = ps)
             } else {
                 val g = newGroup()
-                prop(name, parts, group = g)
+                prop(name, parts, types = prefType, params = ps, group = g)
                 prop("X-ABLabel", listOf(label), group = g)
             }
         }
 
         fun raw(line: String) {
-            lines.add(if (ver == VCardVersion.V21) line else VCardSyntax.fold(line))
+            // Quoted-printable lines are never folded: a fold after "=" would read back as a soft break.
+            val qp = VCardSyntax.splitLine(line).first.uppercase().contains("QUOTED-PRINTABLE")
+            lines.add(if (ver == VCardVersion.V21 || qp) line else VCardSyntax.fold(line))
         }
     }
 
@@ -91,8 +102,8 @@ object VCardWriter {
         if (n.nickname.isNotBlank()) x.prop("NICKNAME", listOf(n.nickname))
         if (n.phoneticFirst.isNotBlank()) x.prop("X-PHONETIC-FIRST-NAME", listOf(n.phoneticFirst))
         if (n.phoneticLast.isNotBlank()) x.prop("X-PHONETIC-LAST-NAME", listOf(n.phoneticLast))
-        if (c.org.company.isNotBlank() || c.org.department.isNotBlank()) {
-            x.prop("ORG", listOf(c.org.company, c.org.department))
+        if (c.org.company.isNotBlank() || c.org.department.isNotBlank() || c.org.units.isNotEmpty()) {
+            x.prop("ORG", listOf(c.org.company, c.org.department) + c.org.units)
         }
         if (c.org.title.isNotBlank()) x.prop("TITLE", listOf(c.org.title))
         c.photo?.takeIf { it.isNotEmpty() }?.let { bytes ->
@@ -107,32 +118,41 @@ object VCardWriter {
             }
         }
         for (p in c.phones.filter { it.value.isNotBlank() }) {
-            x.labelled("TEL", listOf(p.value), p.label.ifBlank { "Mobile" }, VCardLabels.TYPES.getValue("TEL"))
+            x.labelled("TEL", listOf(p.value), p.label.ifBlank { "Mobile" }, VCardLabels.TYPES.getValue("TEL"), p.pref, p.params)
         }
         for (e in c.emails.filter { it.value.isNotBlank() }) {
-            x.labelled("EMAIL", listOf(e.value), e.label.ifBlank { "Other" }, VCardLabels.TYPES.getValue("EMAIL"))
+            x.labelled("EMAIL", listOf(e.value), e.label.ifBlank { "Other" }, VCardLabels.TYPES.getValue("EMAIL"), e.pref, e.params)
         }
-        for (a in c.addresses.filter { listOf(it.street, it.city, it.region, it.postcode, it.country).any { s -> s.isNotBlank() } }) {
+        for (a in c.addresses.filter { listOf(it.street, it.city, it.region, it.postcode, it.country, it.poBox, it.extended).any { s -> s.isNotBlank() } }) {
             x.labelled(
-                "ADR", listOf("", "", a.street, a.city, a.region, a.postcode, a.country),
-                a.label.ifBlank { "Other" }, VCardLabels.TYPES.getValue("ADR"),
+                "ADR", listOf(a.poBox, a.extended, a.street, a.city, a.region, a.postcode, a.country),
+                a.label.ifBlank { "Other" }, VCardLabels.TYPES.getValue("ADR"), a.pref, a.params,
             )
         }
-        for (w in c.websites.filter { it.value.isNotBlank() }) x.labelled("URL", listOf(w.value), w.label)
+        for (w in c.websites.filter { it.value.isNotBlank() }) x.labelled("URL", listOf(w.value), w.label, VCardLabels.GENERIC_TYPES, w.pref, w.params)
         var bdayDone = false
         for (e in c.events.filter { it.value.isNotBlank() }) {
             when {
-                e.label.equals("birthday", true) && !bdayDone -> { bdayDone = true; x.prop("BDAY", listOf(e.value)) }
+                e.label.equals("birthday", true) && !bdayDone -> { bdayDone = true; x.prop("BDAY", listOf(e.value), params = e.params.map { "${it.key}=${it.value}" }) }
                 e.label.equals("anniversary", true) ->
-                    x.prop(if (ver == VCardVersion.V40) "ANNIVERSARY" else "X-ANNIVERSARY", listOf(e.value))
-                else -> x.labelled("X-ABDATE", listOf(e.value), e.label.ifBlank { "other" })
+                    x.prop(
+                        if (ver == VCardVersion.V40) "ANNIVERSARY" else "X-ANNIVERSARY", listOf(e.value),
+                        params = e.params.map { "${it.key}=${it.value}" },
+                    )
+                else -> x.labelled("X-ABDATE", listOf(e.value), e.label.ifBlank { "other" }, meta = e.params)
             }
         }
         for (i in c.ims.filter { it.value.isNotBlank() }) {
             val prop = VCardLabels.IM_WRITE[i.label]
-            if (prop != null) x.prop(prop, listOf(i.value)) else x.labelled("IMPP", listOf(i.value), i.label)
+            if (prop != null && i.params.isEmpty() && !i.pref) {
+                x.prop(prop, listOf(i.value))
+            } else {
+                // a label that came from X-SERVICE-TYPE is already carried by that parameter
+                val label = if (i.params["X-SERVICE-TYPE"]?.trim('"') == i.label) "" else i.label
+                x.labelled("IMPP", listOf(i.value), label, VCardLabels.GENERIC_TYPES, i.pref, i.params)
+            }
         }
-        for (r in c.relations.filter { it.value.isNotBlank() }) x.labelled("X-ABRELATEDNAMES", listOf(r.value), r.label)
+        for (r in c.relations.filter { it.value.isNotBlank() }) x.labelled("X-ABRELATEDNAMES", listOf(r.value), r.label, VCardLabels.GENERIC_TYPES, r.pref, r.params)
         if (c.notes.isNotBlank()) x.prop("NOTE", listOf(c.notes))
         if (c.groups.isNotEmpty()) {
             x.prop("CATEGORIES", listOf(c.groups.joinToString(",") { VCardSyntax.escape(it) }), preEscaped = true)

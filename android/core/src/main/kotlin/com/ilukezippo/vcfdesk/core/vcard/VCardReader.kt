@@ -94,7 +94,7 @@ internal object VCardSyntax {
         for (line in raw) {
             val indented = line.startsWith(" ") || line.startsWith("\t")
             if (out.isNotEmpty() && pendingQp) {
-                out[out.size - 1] = out.last().dropLast(1) + (if (indented) line.substring(1) else line)
+                out[out.size - 1] = out.last().dropLast(1) + line
             } else if (indented && out.isNotEmpty()) {
                 out[out.size - 1] = out.last() + line.substring(1)
             } else {
@@ -154,6 +154,7 @@ internal object VCardLabels {
         ),
         "ADR" to mapOf("Home" to listOf("HOME"), "Work" to listOf("WORK"), "Other" to emptyList()),
     )
+    val GENERIC_TYPES = mapOf("Home" to listOf("HOME"), "Work" to listOf("WORK"), "Other" to listOf("OTHER"))
     val AB = mapOf(
         "MOBILE" to "Mobile", "IPHONE" to "Mobile", "HOME" to "Home", "WORK" to "Work",
         "HOMEFAX" to "Home fax", "WORKFAX" to "Work fax", "PAGER" to "Pager", "OTHER" to "Other",
@@ -255,6 +256,31 @@ object VCardReader {
         }
     }
 
+    private fun pref(p: Prop) = "PREF" in p.types() || p.param("PREF") != null
+
+    /** Non-TYPE parameters kept verbatim (LANGUAGE, ADR LABEL=, X-APPLE-OMIT-YEAR, VALUE, ...). */
+    private fun meta(p: Prop): Map<String, String> {
+        val m = LinkedHashMap<String, String>()
+        for ((k, v) in p.params) {
+            if (k in setOf("TYPE", "ENCODING", "CHARSET", "PREF")) continue
+            if (k == "VALUE" && p.name == "TEL") continue
+            m[k] = v
+        }
+        return m
+    }
+
+    /** Label from TYPE for properties without a standard label set (URL, IMPP, RELATED). */
+    private fun genericLabel(p: Prop): String {
+        val t = p.types().filter { it != "PREF" }
+        return when (val f = t.firstOrNull()) {
+            null -> ""
+            "HOME" -> "Home"
+            "WORK" -> "Work"
+            "OTHER" -> "Other"
+            else -> f.lowercase()
+        }
+    }
+
     private fun standardLabel(p: Prop): String {
         val t = p.types().toSet()
         if (p.name == "TEL") {
@@ -320,31 +346,35 @@ object VCardReader {
                 "X-PHONETIC-LAST-NAME" ->
                     if (firstOf(p.name)) name = name.copy(phoneticLast = text(p)) else extra()
                 "ORG" -> if (firstOf("ORG")) {
-                    val o = VCardSyntax.splitUnescaped(p.value).map { VCardSyntax.unescape(it) } + List(2) { "" }
-                    org = org.copy(company = o[0], department = o[1])
+                    val o = VCardSyntax.splitUnescaped(p.value).map { VCardSyntax.unescape(it) }
+                    org = org.copy(
+                        company = o[0], department = o.getOrElse(1) { "" },
+                        units = o.drop(2).dropLastWhile { it.isEmpty() },
+                    )
                 } else extra()
                 "TITLE" -> if (firstOf("TITLE")) org = org.copy(title = text(p)) else extra()
                 "NOTE" -> if (firstOf("NOTE")) notes = text(p) else extra()
                 "TEL" -> {
                     val v = text(p).trim().let { if (it.lowercase().startsWith("tel:")) it.substring(4) else it }
-                    phones.add(Typed(typedLabel(p), v))
+                    phones.add(Typed(typedLabel(p), v, pref(p), meta(p)))
                 }
-                "EMAIL" -> emails.add(Typed(typedLabel(p), text(p)))
+                "EMAIL" -> emails.add(Typed(typedLabel(p), text(p), pref(p), meta(p)))
                 "ADR" -> {
                     val a = VCardSyntax.splitUnescaped(p.value).map { VCardSyntax.unescape(it) } + List(7) { "" }
-                    val street = listOf(a[0], a[1], a[2]).filter { it.isNotBlank() }.joinToString(" ")
-                    addresses.add(Address(typedLabel(p), street, a[3], a[4], a[5], a[6]))
+                    addresses.add(
+                        Address(typedLabel(p), a[2], a[3], a[4], a[5], a[6], a[0], a[1], pref(p), meta(p)),
+                    )
                 }
-                "URL" -> websites.add(Typed(abLabel(p) ?: "", text(p)))
-                "BDAY" -> events.add(Typed("birthday", normDate(text(p))))
-                "ANNIVERSARY", "X-ANNIVERSARY" -> events.add(Typed("anniversary", normDate(text(p))))
+                "URL" -> websites.add(Typed(abLabel(p) ?: genericLabel(p), text(p), pref(p), meta(p)))
+                "BDAY" -> events.add(Typed("birthday", normDate(text(p)), false, meta(p)))
+                "ANNIVERSARY", "X-ANNIVERSARY" -> events.add(Typed("anniversary", normDate(text(p)), false, meta(p)))
                 "X-ABDATE" -> {
                     val l = abLabel(p)?.let { if (it.equals("birthday", true) || it.equals("anniversary", true)) it.lowercase() else it }
-                    events.add(Typed(l ?: "other", normDate(text(p))))
+                    events.add(Typed(l ?: "other", normDate(text(p)), false, meta(p)))
                 }
-                "X-ABRELATEDNAMES" -> relations.add(Typed(abLabel(p) ?: "", text(p)))
-                "RELATED" -> relations.add(Typed(abLabel(p) ?: p.types().firstOrNull()?.lowercase().orEmpty(), text(p)))
-                "IMPP" -> ims.add(Typed(abLabel(p) ?: p.param("X-SERVICE-TYPE").orEmpty(), text(p)))
+                "X-ABRELATEDNAMES" -> relations.add(Typed(abLabel(p) ?: genericLabel(p), text(p), pref(p), meta(p)))
+                "RELATED" -> relations.add(Typed(abLabel(p) ?: genericLabel(p), text(p), pref(p), meta(p)))
+                "IMPP" -> ims.add(Typed(abLabel(p) ?: p.param("X-SERVICE-TYPE") ?: genericLabel(p), text(p), pref(p), meta(p)))
                 "CATEGORIES" -> VCardSyntax.splitUnescaped(p.value, ',')
                     .map { VCardSyntax.unescape(it).trim() }.filter { it.isNotEmpty() }.forEach { groups.add(it) }
                 "PHOTO" -> {
@@ -354,7 +384,7 @@ object VCardReader {
                 "X-ABLABEL" -> if (p.group.isEmpty()) extra()
                 else -> {
                     val im = VCardLabels.IM[p.name]
-                    if (im != null) ims.add(Typed(im, text(p))) else extra()
+                    if (im != null) ims.add(Typed(im, text(p), pref(p), meta(p))) else extra()
                 }
             }
         }

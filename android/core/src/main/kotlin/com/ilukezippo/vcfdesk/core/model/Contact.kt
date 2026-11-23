@@ -15,8 +15,16 @@ data class Name(
     val display: String = "",
 )
 
-/** A labelled value (phone, email, website, event, relation, IM). */
-data class Typed(val label: String, val value: String)
+/**
+ * A labelled value (phone, email, website, event, relation, IM).
+ * [pref] is the vCard PREF flag; [params] holds the non-TYPE vCard parameters verbatim (LANGUAGE, VALUE, ...).
+ */
+data class Typed(
+    val label: String,
+    val value: String,
+    val pref: Boolean = false,
+    val params: Map<String, String> = emptyMap(),
+)
 
 data class Address(
     val label: String = "",
@@ -25,9 +33,19 @@ data class Address(
     val region: String = "",
     val postcode: String = "",
     val country: String = "",
+    val poBox: String = "",
+    val extended: String = "",
+    val pref: Boolean = false,
+    val params: Map<String, String> = emptyMap(),
 )
 
-data class Org(val company: String = "", val department: String = "", val title: String = "")
+/** [units] are any ORG components after the department. */
+data class Org(
+    val company: String = "",
+    val department: String = "",
+    val title: String = "",
+    val units: List<String> = emptyList(),
+)
 
 /**
  * Data a source holds that the model does not cover, kept verbatim.

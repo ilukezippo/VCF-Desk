@@ -55,10 +55,41 @@ class DuplicatesTest {
         assertEquals(listOf(listOf("1", "4"), listOf("3", "5")), groups.map { g -> g.map { it.id } })
     }
 
-    @Test fun separatorsAndCountryCodeStillMatch() {
+    @Test fun separatorsStillMatch() {
         val a = c("1", "Name 8", phones = listOf("5555 5555"))
         val b = c("2", "Name 8", phones = listOf("(5555) 5555"))
         assertEquals(listOf(listOf("1", "2")), Duplicates.groups(listOf(a, b)).map { g -> g.map { it.id } })
+    }
+
+    @Test fun phoneWithNoDigitsIsDroppedFromKey() {
+        val withJunk = c("1", "Name 9", phones = listOf("call me"))
+        val bare = c("2", "Name 9")
+        assertEquals(listOf(listOf("1", "2")), Duplicates.groups(listOf(withJunk, bare)).map { g -> g.map { it.id } })
+    }
+
+    @Test fun arabicIndicDigitsMatchAsciiDigits() {
+        val arabic = c("1", "Name 10", phones = listOf("\u0665".repeat(8)))
+        val ascii = c("2", "Name 10", phones = listOf("55555555"))
+        assertEquals(listOf(listOf("1", "2")), Duplicates.groups(listOf(arabic, ascii)).map { g -> g.map { it.id } })
+    }
+
+    @Test fun arabicIndicSameNumberMatchesArabicIndic() {
+        val first = c("1", "Name 12", phones = listOf("\u0669".repeat(8)))
+        val second = c("2", "Name 12", phones = listOf("\u0669".repeat(8)))
+        assertEquals(listOf(listOf("1", "2")), Duplicates.groups(listOf(first, second)).map { g -> g.map { it.id } })
+    }
+
+    @Test fun arabicIndicDifferentNumbersDoNotMatch() {
+        val nine = c("1", "Name 11", phones = listOf("\u0669".repeat(8)))
+        val six = c("2", "Name 11", phones = listOf("\u0666".repeat(8)))
+        assertTrue(Duplicates.groups(listOf(nine, six)).isEmpty())
+    }
+
+    @Test fun emptyKeysAreNeverGrouped() {
+        val a = c("1", "")
+        val b = c("2", "")
+        val d = c("3", "")
+        assertTrue(Duplicates.groups(listOf(a, b, d)).isEmpty())
     }
 
     @Test fun keeperPrefersPhoto() {

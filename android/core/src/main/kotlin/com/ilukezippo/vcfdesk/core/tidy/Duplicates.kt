@@ -18,7 +18,11 @@ object Duplicates {
     /** Groups of two or more contacts with the same key, each within one account. */
     fun groups(cs: List<Contact>): List<List<Contact>> {
         val byKey = LinkedHashMap<Key, MutableList<Contact>>()
-        for (c in cs) byKey.getOrPut(keyOf(c)) { mutableListOf() }.add(c)
+        for (c in cs) {
+            val k = keyOf(c)
+            if (k.name.isEmpty() && k.phones.isEmpty() && k.emails.isEmpty()) continue
+            byKey.getOrPut(k) { mutableListOf() }.add(c)
+        }
         return byKey.values.filter { it.size > 1 }
     }
 
@@ -33,8 +37,16 @@ object Duplicates {
         emails = c.emails.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.toSortedSet(),
     )
 
-    /** Digits only, last 9 kept: the same rule as `duplicate_key` on desktop. */
-    private fun phoneKey(v: String): String = v.filter { it in '0'..'9' }.takeLast(9)
+    /**
+     * Every Unicode decimal digit mapped to its ASCII value, last 9 kept: the same rule as
+     * `duplicate_key` on desktop, so Arabic-Indic and ASCII forms of one number match.
+     */
+    private fun phoneKey(v: String): String {
+        val digits = buildString {
+            for (ch in v) if (ch.isDigit()) append(Character.digit(ch, 10))
+        }
+        return digits.takeLast(9)
+    }
 
     private fun filled(c: Contact): Int {
         val n = c.name

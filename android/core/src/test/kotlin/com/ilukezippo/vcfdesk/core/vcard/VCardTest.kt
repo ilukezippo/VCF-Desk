@@ -213,5 +213,9 @@ class VCardTest {
         for (v in VCardVersion.values()) {
             assertEquals(v.name, c, VCardReader.read(VCardWriter.write(listOf(c), v)).single())
         }
+        val v40 = VCardWriter.write(listOf(c), VCardVersion.V40)
+        assertTrue(v40, v40.contains("PREF=1"))
+        assertTrue(v40, !v40.contains("TYPE=pref") && !v40.lowercase().contains(",pref"))
+        assertTrue(VCardWriter.write(listOf(c), VCardVersion.V30).contains("PREF"))
     }
 }

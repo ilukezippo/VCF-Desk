@@ -60,8 +60,10 @@ object VCardWriter {
             pref: Boolean = false,
             meta: Map<String, String> = emptyMap(),
         ) {
-            val ps = meta.map { "${it.key}=${it.value}" }
-            val prefType = if (pref) listOf("PREF") else emptyList()
+            // RFC 6350 has no TYPE=pref: vCard 4.0 carries the preference as PREF=1
+            val v40 = ver == VCardVersion.V40
+            val ps = meta.map { "${it.key}=${it.value}" } + (if (pref && v40) listOf("PREF=1") else emptyList())
+            val prefType = if (pref && !v40) listOf("PREF") else emptyList()
             val std = standardTypes?.get(label)
             if (std != null) {
                 prop(name, parts, types = (if (ver == VCardVersion.V40) std - "INTERNET" else std) + prefType, params = ps)

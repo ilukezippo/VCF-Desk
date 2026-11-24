@@ -39,9 +39,8 @@ suspend fun ContentResolver.readCapped(uri: Uri, limit: Long = MAX_IMPORT_BYTES)
     }
 }
 
-suspend fun ContentResolver.writeAll(uri: Uri, bytes: ByteArray) = withContext(Dispatchers.IO) {
-    val out = openOutputStream(uri, "wt") ?: throw IOException("the file could not be opened for writing")
-    out.use { it.write(bytes) }
+suspend fun ContentResolver.openOutputForWrite(uri: Uri): java.io.OutputStream = withContext(Dispatchers.IO) {
+    (openOutputStream(uri, "wt") ?: throw IOException("the file could not be opened for writing")).buffered()
 }
 
 /** ACTION_CREATE_DOCUMENT with a given MIME type and suggested name. */

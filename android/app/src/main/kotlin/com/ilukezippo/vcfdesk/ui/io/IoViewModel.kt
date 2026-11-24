@@ -18,6 +18,7 @@ import com.ilukezippo.vcfdesk.data.ContactSource
 import com.ilukezippo.vcfdesk.data.PhotoUnavailableException
 import com.ilukezippo.vcfdesk.ui.bulk.displayName
 import java.io.File
+import java.io.OutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -106,7 +107,11 @@ class ImportViewModel(
     private var job: Job? = null
     private var counting: Job? = null
 
+    /** A file that arrived while an import was running; opened once the import's report is dismissed. */
+    private var queued: Uri? = null
+
     fun open(uri: Uri) {
+        if (isImporting || _state.value is ImportState.Done) { queued = uri; return }
         job?.cancel()
         counting?.cancel()
         _state.value = ImportState.Loading
@@ -234,13 +239,18 @@ class ImportViewModel(
         }
     }
 
-    /** Back to the start (leaving the screen, or "import another"). */
+    /** Whether an import is writing contacts right now (it can't be cancelled or left). */
+    val isImporting: Boolean get() = _state.value is ImportState.Importing
+
+    /** Back to the start (leaving the screen, or "import another"). A running import is never cancelled; a file queued meanwhile opens now. */
     fun reset() {
+        if (isImporting) return
         job?.cancel()
         counting?.cancel()
         vcards = emptyList(); sheets = emptyMap(); table = Table(emptyList(), emptyList())
         _mapping.value = emptyList()
         _state.value = ImportState.Idle
+        queued?.let { queued = null; open(it) }
     }
 }
 
@@ -282,8 +292,8 @@ fun ExportFormat.fileName(): String = "contacts.$ext"
  * read in full is left out and reported; the rest is still exported.
  */
 class ExportViewModel(
-    /** Writes the bytes to the document the user picked. */
-    private val writer: suspend (Uri, ByteArray) -> Unit,
+    /** Opens the document the user picked for writing. */
+    private val openOutput: suspend (Uri) -> OutputStream,
     /** Where a file to share is made (the app's cache). */
     private val shareFile: (name: String) -> File,
     private val background: CoroutineDispatcher = Dispatchers.Default,
@@ -320,17 +330,10 @@ class ExportViewModel(
         }
     }
 
-    fun export(scope: ExportScope, f: ExportFormat, dest: Uri) = run(scope, f) { bytes, name ->
-        withContext(background) { writer(dest, bytes) }
-        name
-    }
+    fun export(scope: ExportScope, f: ExportFormat, dest: Uri) = run(scope, f, dest)
 
     /** Makes the file in the cache and posts it to [pendingShare]. */
-    fun share(scope: ExportScope, f: ExportFormat) = run(scope, f) { bytes, name ->
-        val file = withContext(background) { shareFile(name).also { it.parentFile?.mkdirs(); it.writeBytes(bytes) } }
-        _share.value = ShareFile(file, f.mime())
-        name
-    }
+    fun share(scope: ExportScope, f: ExportFormat) = run(scope, f, null)
 
     fun shareHandled() { _share.value = null }
 
@@ -338,19 +341,59 @@ class ExportViewModel(
 
     fun reset() { if (_state.value !is ExportState.Working) { _state.value = ExportState.Idle; _share.value = null } }
 
-    private fun run(scope: ExportScope, f: ExportFormat, deliver: suspend (ByteArray, String) -> String) {
+    private fun run(scope: ExportScope, f: ExportFormat, dest: Uri?) {
         val src = source ?: return
         if (_state.value is ExportState.Working) return
         _state.value = ExportState.Working(0, 0)
         job = viewModelScope.launch {
             try {
-                val (people, skipped) = withContext(background) { gather(src, scope) }
-                val omitted = if (f == ExportFormat.EXCEL) Exporters.excelPhotosOmitted(people) else 0
-                val name = if (people.isEmpty()) null else {
-                    val bytes = withContext(background) { Exporters.export(people, f) }
-                    deliver(bytes, f.fileName())
+                val listed = withContext(background) { listContacts(src, scope) }
+                val skipped = ArrayList<Pair<String, String>>()
+                var exported = 0
+                var omitted = 0
+                val file = if (dest == null) shareFile(f.fileName()) else null
+                suspend fun open(): OutputStream =
+                    if (dest != null) openOutput(dest) else file!!.also { it.parentFile?.mkdirs() }.outputStream().buffered()
+
+                if (Exporters.isStreamable(f)) {
+                    // chunk by chunk: load, write, drop; photos never pile up
+                    withContext(background) {
+                        var writer: Exporters.StreamWriter? = null
+                        try {
+                            var done = 0
+                            for (chunk in listed.chunked(CHUNK)) {
+                                val loaded = loadAll(src, chunk, skipped, done, listed.size)
+                                done += chunk.size
+                                if (loaded.isNotEmpty()) {
+                                    val w = writer ?: Exporters.StreamWriter(f, open()).also { writer = it }
+                                    w.add(loaded)
+                                    exported += loaded.size
+                                }
+                            }
+                            writer?.close()
+                            writer = null
+                        } finally {
+                            writer?.let { runCatching { it.close() } }
+                        }
+                    }
+                } else {
+                    try {
+                        withContext(background) {
+                            val people = loadAll(src, listed, skipped, 0, listed.size)
+                            exported = people.size
+                            if (f == ExportFormat.EXCEL) omitted = Exporters.excelPhotosOmitted(people)
+                            if (people.isNotEmpty()) {
+                                val bytes = Exporters.export(people, f)
+                                open().use { it.write(bytes) }
+                            }
+                        }
+                    } catch (e: OutOfMemoryError) {
+                        _state.value = ExportState.Failed("Too many photos to export to ${f.name} at once. Export to VCF instead, or export fewer contacts.")
+                        return@launch
+                    }
                 }
-                _state.value = ExportState.Done(ExportReport(people.size, skipped, omitted, name))
+                if (file != null && exported > 0) _share.value = ShareFile(file, f.mime())
+                _state.value = ExportState.Done(ExportReport(exported, skipped, omitted, if (exported > 0) f.fileName() else null))
             } catch (e: CancellationException) {
                 _state.value = ExportState.Idle
                 throw e
@@ -360,8 +403,8 @@ class ExportViewModel(
         }
     }
 
-    private suspend fun gather(src: ContactSource, scope: ExportScope): Pair<List<Contact>, List<Pair<String, String>>> {
-        val listed: List<Contact> = when (scope) {
+    private suspend fun listContacts(src: ContactSource, scope: ExportScope): List<Contact> {
+        return when (scope) {
             ExportScope.ALL -> src.contacts().first()
             ExportScope.RESULTS -> results
             ExportScope.SELECTION -> results.filter { it.id in selected }.let { r ->
@@ -370,10 +413,15 @@ class ExportViewModel(
                 r + selected.filter { it !in have }.map { Contact(id = it) }
             }
         }
+    }
+
+    /** Loads each of [listed] in full; one that can't be read is left out and noted in [skipped]. */
+    private suspend fun loadAll(
+        src: ContactSource, listed: List<Contact>, skipped: MutableList<Pair<String, String>>, base: Int, total: Int,
+    ): List<Contact> {
         val out = ArrayList<Contact>()
-        val skipped = ArrayList<Pair<String, String>>()
         listed.forEachIndexed { i, c ->
-            _state.value = ExportState.Working(i, listed.size)
+            _state.value = ExportState.Working(base + i, total)
             try {
                 out += src.load(c.id)
             } catch (e: CancellationException) {
@@ -386,9 +434,11 @@ class ExportViewModel(
                 skipped += label(c) to (e.message ?: e.javaClass.simpleName)
             }
         }
-        _state.value = ExportState.Working(listed.size, listed.size)
-        return out to skipped
+        _state.value = ExportState.Working(base + listed.size, total)
+        return out
     }
+
+    private companion object { const val CHUNK = 50 }
 
     private fun label(c: Contact) = displayName(c).ifBlank { c.id }
 }

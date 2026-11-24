@@ -116,4 +116,14 @@ class ExportersTest {
         assertEquals(1, Exporters.excelPhotosOmitted(listOf(big, small, none)))
         assertEquals(0, Exporters.excelPhotosOmitted(listOf(small, none)))
     }
+
+    @Test fun streamingEqualsInMemory() {
+        val cs = demo()
+        for (f in ExportFormat.entries.filter { Exporters.isStreamable(it) }) {
+            val bos = java.io.ByteArrayOutputStream()
+            Exporters.StreamWriter(f, bos).use { w -> cs.chunked(2).forEach { w.add(it) } }
+            if (f == ExportFormat.SPLIT_VCF_ZIP) assertEquals(zipNames(Exporters.export(cs, f)), zipNames(bos.toByteArray()))
+            else assertArrayEquals(f.name, Exporters.export(cs, f), bos.toByteArray())
+        }
+    }
 }

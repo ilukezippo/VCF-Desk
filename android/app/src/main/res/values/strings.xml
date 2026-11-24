@@ -301,6 +301,7 @@
         <item quantity="one">%1$d contact could not be added</item>
         <item quantity="other">%1$d contacts could not be added</item>
     </plurals>
+    <string name="import_in_progress">Import in progress. Please wait until it finishes.</string>
     <string name="import_another">Import another file</string>
 
     <string name="col_skip">Skip</string>

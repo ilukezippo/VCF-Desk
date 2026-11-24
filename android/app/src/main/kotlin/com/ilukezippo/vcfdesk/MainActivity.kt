@@ -56,7 +56,7 @@ import com.ilukezippo.vcfdesk.ui.io.ExportViewModel
 import com.ilukezippo.vcfdesk.ui.io.ImportScreen
 import com.ilukezippo.vcfdesk.ui.io.ImportViewModel
 import com.ilukezippo.vcfdesk.ui.io.readCapped
-import com.ilukezippo.vcfdesk.ui.io.writeAll
+import com.ilukezippo.vcfdesk.ui.io.openOutputForWrite
 import com.ilukezippo.vcfdesk.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
 import java.io.File
@@ -207,9 +207,15 @@ class MainActivity : ComponentActivity() {
     private fun OverlayScreen(screen: Screen, vm: ContactListViewModel, listState: com.ilukezippo.vcfdesk.ui.list.ListState) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
+        val importing = stringResource(R.string.import_in_progress)
         val leave: () -> Unit = {
-            if (screen == Screen.Import) importVmHolder?.reset()
-            nav.back()
+            if (screen == Screen.Import && importVmHolder?.isImporting == true) {
+                // never cancel a half-done import (it would be re-run and duplicate contacts)
+                android.widget.Toast.makeText(context, importing, android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                if (screen == Screen.Import) importVmHolder?.reset()
+                nav.back()
+            }
         }
         BackHandler(onBack = leave)
         when (screen) {
@@ -331,7 +337,7 @@ private class ImportFactory(private val container: AppContainer, private val con
 private class ExportFactory(private val context: android.content.Context) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = ExportViewModel(
-        writer = { uri, bytes -> context.contentResolver.writeAll(uri, bytes) },
+        openOutput = { uri -> context.contentResolver.openOutputForWrite(uri) },
         shareFile = { name -> File(File(context.cacheDir, "share"), name) },
     ) as T
 }

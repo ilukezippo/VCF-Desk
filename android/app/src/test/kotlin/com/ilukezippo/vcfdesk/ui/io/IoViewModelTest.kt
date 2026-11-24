@@ -151,10 +151,41 @@ class IoViewModelTest {
         assertTrue(target.log.single().startsWith("create:"))
     }
 
+    @Test fun leavingOrOpeningDuringAnImportNeverCancelsIt() = runTest(dispatcher) {
+        val files = mapOf(uri to vcf(3), Uri.parse("content://test/second") to vcf(2))
+        val vm = ImportViewModel({ files.getValue(it) }, flowOf("+965"), dispatcher)
+        vm.open(uri)
+        val inner = FakeSource()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val slow = object : com.ilukezippo.vcfdesk.data.ContactSource by inner {
+            override suspend fun create(cs: List<Contact>, target: AccountTag?, onProgress: (Int) -> Unit): com.ilukezippo.vcfdesk.data.WriteResult {
+                gate.await()
+                return inner.create(cs, target, onProgress)
+            }
+        }
+        vm.importInto(slow, null)
+        assertTrue(vm.isImporting)
+        vm.reset()
+        vm.open(Uri.parse("content://test/second"))
+        assertTrue(vm.isImporting)
+        gate.complete(Unit)
+        val done = vm.state.value as ImportState.Done
+        assertEquals(3, done.report.written)
+        assertEquals(3, inner.all().size)
+        // the report stays until it is dismissed; then the queued file opens
+        vm.open(Uri.parse("content://test/second"))
+        assertTrue(vm.state.value is ImportState.Done)
+        vm.reset()
+        assertEquals(2, (vm.state.value as ImportState.Ready).count)
+    }
+
     // ---- export
 
     private fun exportVm(sink: MutableList<Pair<Uri, ByteArray>> = ArrayList()) =
-        ExportViewModel({ u, b -> sink += u to b }, { File(tmp.root, "share/$it") }, dispatcher)
+        ExportViewModel(
+            { u -> object : ByteArrayOutputStream() { override fun close() { super.close(); sink += u to toByteArray() } } },
+            { File(tmp.root, "share/$it") }, dispatcher,
+        )
 
     private fun seeded(n: Int): Pair<FakeSource, List<Contact>> {
         val src = FakeSource()
@@ -226,6 +257,29 @@ class IoViewModelTest {
         assertEquals(2, Xlsx.sheets(s.file.readBytes()).getValue("Contacts").rows.size)
         vm.shareHandled()
         assertNull(vm.pendingShare.value)
+    }
+
+    @Test fun vcfExportStreamsInChunks() {
+        val (src, cs) = seeded(120)
+        val sink = ArrayList<Pair<Uri, ByteArray>>()
+        val vm = exportVm(sink)
+        vm.configure(src, cs, emptySet())
+        vm.export(ExportScope.RESULTS, ExportFormat.ANDROID_VCF, uri)
+        assertEquals(120, VCardReader.read(sink.single().second).size)
+        assertEquals(120, (vm.state.value as ExportState.Done).report.exported)
+        sink.clear()
+        vm.export(ExportScope.RESULTS, ExportFormat.SPLIT_VCF_ZIP, uri)
+        assertTrue(sink.single().second.isNotEmpty())
+    }
+
+    @Test fun nothingExportedWritesNoFile() {
+        val src = FakeSource()
+        val sink = ArrayList<Pair<Uri, ByteArray>>()
+        val vm = exportVm(sink)
+        vm.configure(src, emptyList(), emptySet())
+        vm.export(ExportScope.RESULTS, ExportFormat.ANDROID_VCF, uri)
+        assertTrue(sink.isEmpty())
+        assertEquals(0, (vm.state.value as ExportState.Done).report.exported)
     }
 
     @Test fun formatsHaveMimeAndName() {

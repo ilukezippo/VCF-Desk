@@ -46,9 +46,33 @@ object Exporters {
         s.replace(Regex("[\\\\/:*?\"<>|\\r\\n\\t]+"), " ").trim(' ', '.').take(80)
 
     private fun splitZip(cs: List<Contact>): ByteArray {
-        val used = HashSet<String>()
         val bos = ByteArrayOutputStream()
-        ZipOutputStream(bos).use { z ->
+        StreamWriter(ExportFormat.SPLIT_VCF_ZIP, bos).use { it.add(cs) }
+        return bos.toByteArray()
+    }
+
+    /** Formats that can be written chunk by chunk, so a big photo-heavy book never has to fit in memory. */
+    fun isStreamable(f: ExportFormat): Boolean = when (f) {
+        ExportFormat.ANDROID_VCF, ExportFormat.IPHONE_VCF, ExportFormat.VCARD4, ExportFormat.SPLIT_VCF_ZIP -> true
+        else -> false
+    }
+
+    /**
+     * Writes a streamable format to [out] in chunks: call [add] for each batch, then [close].
+     * The bytes are identical to [export] of all the contacts at once.
+     */
+    class StreamWriter(private val f: ExportFormat, private val out: java.io.OutputStream) : java.io.Closeable {
+        init { require(isStreamable(f)) { "$f can't be streamed" } }
+        private val zip = if (f == ExportFormat.SPLIT_VCF_ZIP) ZipOutputStream(out) else null
+        private val used = HashSet<String>()
+
+        fun add(cs: List<Contact>) {
+            val z = zip
+            if (z == null) {
+                val ver = if (f == ExportFormat.VCARD4) VCardVersion.V40 else VCardVersion.V30
+                out.write(VCardWriter.write(cs, ver).toByteArray(Charsets.UTF_8))
+                return
+            }
             for (c in cs) {
                 val base = safeFilename(displayName(c)).ifEmpty { "contact" }
                 var name = base
@@ -60,7 +84,12 @@ object Exporters {
                 z.closeEntry()
             }
         }
-        return bos.toByteArray()
+
+        override fun close() {
+            zip?.finish()
+            out.flush()
+            out.close()
+        }
     }
 
     // ---- generic table (CSV / Excel) -----------------------------------------------------------

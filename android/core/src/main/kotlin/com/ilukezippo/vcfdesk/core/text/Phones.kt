@@ -1,14 +1,26 @@
 package com.ilukezippo.vcfdesk.core.text
 
+/** Every Unicode decimal digit (Arabic-Indic ٠-٩, Persian ۰-۹, …) as its ASCII digit; other characters unchanged. */
+fun foldDigits(v: String): String {
+    if (v.all { it in '0'..'9' || !it.isDigit() }) return v
+    val sb = StringBuilder(v.length)
+    for (c in v) {
+        val d = if (c.isDigit()) Character.digit(c, 10) else -1
+        sb.append(if (d >= 0) ('0' + d) else c)
+    }
+    return sb.toString()
+}
+
 object Phones {
     private val sep = Regex("[\\s\\-().]")
 
-    fun normalise(v: String, cc: String): String = convert(v, cc, 8)
+    fun normalise(v: String, cc: String): String = convert(foldDigits(v), foldDigits(cc), 8)
 
-    fun addCountryCode(v: String, cc: String = "+965", localLength: Int = 8): String = convert(v, cc, localLength)
+    fun addCountryCode(v: String, cc: String = "+965", localLength: Int = 8): String =
+        convert(foldDigits(v), foldDigits(cc), localLength)
 
     private fun convert(raw: String, cc: String, localLength: Int): String {
-        var v = raw.trim()
+        var v = foldDigits(raw).trim()
         if (v.endsWith(".0") && v.length > 2 && v.dropLast(2).all { it in '0'..'9' }) v = v.dropLast(2)
         val d = v.replace(sep, "")
         val allDigits = d.isNotEmpty() && d.all { it in '0'..'9' }

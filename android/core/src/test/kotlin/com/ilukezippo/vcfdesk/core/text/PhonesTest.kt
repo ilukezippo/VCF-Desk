@@ -25,4 +25,11 @@ class PhonesTest {
         assertEquals("junk", Dates.normalise("junk"))
         assertEquals("31/02/1990", Dates.normalise("31/02/1990"))
     }
+    @Test fun arabicIndicDigits() {
+        assertEquals("+96555555555", Phones.addCountryCode("٥٥٥٥٥٥٥٥"))
+        assertEquals("+96555555555", Phones.normalise("٥٥٥٥-٥٥٥٥", "+965"))
+        assertEquals("+96599999999", Phones.normalise("۰۰۹۶۵۹۹۹۹۹۹۹۹", "+965"))
+        assertEquals("1990-02-01", Dates.normalise("١/٢/١٩٩٠"))
+        assertEquals("2000-01-01", Dates.normalise("٣٦٥٢٦"))
+    }
 }

@@ -11,7 +11,7 @@ object Dates {
 
     /** yyyy-MM-dd (day first for d/m/y, Excel serials converted), or --MM-dd when there is no year. */
     fun normalise(v0: String): String {
-        val v = v0.trim()
+        val v = foldDigits(v0).trim()
         if (serial.matches(v)) {
             val n = v.substringBefore('.').toLong()
             if (n in 2..79999) return LocalDate.of(1899, 12, 30).plusDays(n).toString()

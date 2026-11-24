@@ -46,6 +46,11 @@ import com.ilukezippo.vcfdesk.ui.AppActions
 import com.ilukezippo.vcfdesk.ui.AppScaffold
 import com.ilukezippo.vcfdesk.ui.DefaultDetail
 import com.ilukezippo.vcfdesk.ui.DetailContent
+import com.ilukezippo.vcfdesk.data.SourceId
+import com.ilukezippo.vcfdesk.ui.bulk.BulkEditSheet
+import com.ilukezippo.vcfdesk.ui.bulk.BulkHolder
+import com.ilukezippo.vcfdesk.ui.bulk.BulkStageDialogs
+import com.ilukezippo.vcfdesk.ui.bulk.BulkViewModel
 import com.ilukezippo.vcfdesk.ui.editor.AndroidPhotoScaler
 import com.ilukezippo.vcfdesk.ui.editor.ContactEditorScreen
 import com.ilukezippo.vcfdesk.ui.editor.ContactEditorViewModel
@@ -71,6 +76,10 @@ class MainActivity : ComponentActivity() {
                         val actions = remember { AppActions() }
                         val holderVm: EditorHolderViewModel = viewModel(factory = EditorHolderFactory(container))
                         val holder = holderVm.holder
+                        val bulkHolderVm: BulkHolderViewModel = viewModel(factory = BulkHolderFactory(container))
+                        val bulkHolder = bulkHolderVm.holder
+                        val bulkVm by bulkHolder.current.collectAsStateWithLifecycle()
+                        val listState by vm.state.collectAsStateWithLifecycle()
                         val pending by holder.pendingSwitch.collectAsStateWithLifecycle()
                         var openRequest by remember { mutableStateOf<String?>(null) }
                         val discard = {
@@ -117,10 +126,25 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
-                                    DefaultDetail(content, actions)
+                                    if (content is DetailContent.Selection) {
+                                        val bulk = bulkHolder.forSelection(listState.source, content.ids)
+                                        BulkEditSheet(
+                                            vm = bulk,
+                                            groups = listState.groups,
+                                            googleSources = listState.sources.filterIsInstance<SourceId.Google>(),
+                                            selectionAccounts = listState.items.filter { it.id in content.ids }.mapTo(HashSet()) { it.account },
+                                            sourceFor = container::source,
+                                        )
+                                    } else {
+                                        DefaultDetail(content, actions)
+                                    }
                                 }
                             },
                         )
+                        // previews, progress and results outlive the selection they were made from
+                        bulkVm?.let { b ->
+                            BulkStageDialogs(b) { bulkHolder.release(); vm.clearSelection() }
+                        }
                         if (pending != null) {
                             AlertDialog(
                                 onDismissRequest = keep,
@@ -166,6 +190,19 @@ private class EditorHolderFactory(private val container: AppContainer) : ViewMod
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = EditorHolderViewModel(
         EditorHolder { source, id -> ContactEditorViewModel({ container.source(source) }, id, AndroidPhotoScaler()) },
+    ) as T
+}
+
+private class BulkHolderViewModel(val holder: BulkHolder) : ViewModel() {
+    override fun onCleared() = holder.release()
+}
+
+private class BulkHolderFactory(private val container: AppContainer) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = BulkHolderViewModel(
+        BulkHolder { source, ids ->
+            BulkViewModel(container.bulkRunner, source, container::source, ids, container.settings.countryCode)
+        },
     ) as T
 }
 

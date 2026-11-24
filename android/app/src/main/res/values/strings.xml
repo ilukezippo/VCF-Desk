@@ -122,4 +122,101 @@
     <string name="field_title">Job title</string>
     <string name="field_notes">Notes</string>
     <string name="field_group">Group name</string>
+    <!-- Bulk edit -->
+    <string name="bulk_set_field">Set field</string>
+    <string name="bulk_find_replace">Find &amp; replace</string>
+    <string name="bulk_groups">Groups</string>
+    <string name="bulk_first_middle">Keep first middle name</string>
+    <string name="bulk_first_middle_hint">Drops everything after the first middle name</string>
+    <string name="bulk_country_code">Add country code</string>
+    <string name="bulk_country_hint">Adds the code to local 8-digit numbers</string>
+    <string name="bulk_copy_move">Copy / move to…</string>
+    <string name="bulk_remove_dupes">Remove exact duplicates</string>
+    <string name="bulk_remove_dupes_hint">Among the selected contacts only; one copy of each is kept</string>
+    <string name="bulk_delete">Delete</string>
+    <string name="bulk_field">Field</string>
+    <string name="bulk_field_company">Company</string>
+    <string name="bulk_field_department">Department</string>
+    <string name="bulk_field_title">Job title</string>
+    <string name="bulk_field_notes">Notes</string>
+    <string name="bulk_field_city">City</string>
+    <string name="bulk_field_country">Country</string>
+    <string name="bulk_field_prefix">Prefix</string>
+    <string name="bulk_field_suffix">Suffix</string>
+    <string name="bulk_field_first">First name</string>
+    <string name="bulk_field_middle">Middle name</string>
+    <string name="bulk_field_last">Last name</string>
+    <string name="bulk_field_nickname">Nickname</string>
+    <string name="bulk_mode_replace">Replace</string>
+    <string name="bulk_mode_clear">Clear</string>
+    <string name="bulk_mode_append">Append</string>
+    <string name="bulk_value">New value</string>
+    <string name="bulk_append_text">Text to add</string>
+    <string name="bulk_find">Find</string>
+    <string name="bulk_replace_with">Replace with</string>
+    <string name="bulk_ignore_case">Ignore case</string>
+    <string name="bulk_group_add">Add to group</string>
+    <string name="bulk_group_remove">Remove from group</string>
+    <string name="bulk_group_pick">Group</string>
+    <string name="bulk_group_new">New group…</string>
+    <string name="bulk_group_name">Group name</string>
+    <string name="bulk_country_label">Country code</string>
+    <string name="bulk_target_label">Where to</string>
+    <string name="bulk_account_label">Account</string>
+    <string name="bulk_account_none">Phone only (no account)</string>
+    <string name="bulk_copy">Copy</string>
+    <string name="bulk_move">Move</string>
+    <string name="bulk_same_target">They are already there. Pick another place or account.</string>
+    <string name="bulk_preview">Preview</string>
+    <string name="bulk_working">Working out the changes…</string>
+
+    <string name="bulk_preview_title">Preview</string>
+    <string name="bulk_nothing">Nothing would change</string>
+    <string name="bulk_continue">Continue</string>
+    <string name="bulk_cancel">Cancel</string>
+    <string name="bulk_close">Close</string>
+    <string name="bulk_names_header">Affected contacts</string>
+    <string name="bulk_before">Before</string>
+    <string name="bulk_after">After</string>
+    <string name="bulk_empty_value">(empty)</string>
+    <string name="bulk_sum_delete">Delete %1$d contacts</string>
+    <string name="bulk_sum_copy">Copy %1$d contacts</string>
+    <string name="bulk_sum_move">Move %1$d contacts</string>
+    <string name="bulk_sum_dupes">Remove %1$d duplicate contacts</string>
+    <string name="bulk_sum_dupes_kept">%1$d kept: they have data the other copy lacks</string>
+    <plurals name="bulk_apply">
+        <item quantity="one">Apply to %1$d contact</item>
+        <item quantity="other">Apply to %1$d contacts</item>
+    </plurals>
+    <plurals name="bulk_sum_to">
+        <item quantity="one">%1$s → %2$s on %3$d contact</item>
+        <item quantity="other">%1$s → %2$s on %3$d contacts</item>
+    </plurals>
+    <plurals name="bulk_sum_changes">
+        <item quantity="one">%1$s changes on %2$d contact</item>
+        <item quantity="other">%1$s changes on %2$d contacts</item>
+    </plurals>
+    <plurals name="bulk_delete_button">
+        <item quantity="one">Delete %1$d contact</item>
+        <item quantity="other">Delete %1$d contacts</item>
+    </plurals>
+    <plurals name="bulk_delete_title">
+        <item quantity="one">Delete %1$d contact?</item>
+        <item quantity="other">Delete %1$d contacts?</item>
+    </plurals>
+    <string name="bulk_delete_body">A backup is saved first, and you can undo right after.</string>
+
+    <string name="bulk_running">Working… %1$d of %2$d</string>
+    <string name="bulk_stop">Stop</string>
+    <string name="bulk_cancelled">Stopped. %1$d of %2$d were processed before it stopped. Whatever was written is kept, and a backup was saved (see Backups).</string>
+    <string name="bulk_done_title">Done</string>
+    <string name="bulk_changed">%1$d changed</string>
+    <string name="bulk_skipped">%1$d skipped (read-only)</string>
+    <string name="bulk_failed_header">%1$d could not be changed</string>
+    <string name="bulk_no_backup">Nothing was written.</string>
+    <string name="bulk_undo">Undo</string>
+    <string name="bulk_undoing">Undoing…</string>
+    <string name="bulk_undone">Undone: %1$d restored</string>
+    <string name="bulk_undo_failed">Could not undo: %1$s</string>
+    <string name="bulk_error_title">Something went wrong</string>
 </resources>

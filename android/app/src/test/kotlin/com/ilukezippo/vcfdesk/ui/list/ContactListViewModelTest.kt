@@ -38,12 +38,15 @@ class ContactListViewModelTest {
     @Before fun setUp() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
+    private var filterRuns = 0
     private fun vm(collator: Comparator<in String> = Collator.getInstance(Locale.ENGLISH)) = ContactListViewModel(
         sourceFor = { id: SourceId -> (if (id == SourceId.Device) device else google) as ContactSource },
         googleAccounts = googleAccounts,
         saveGoogleAccount = { saved += it; googleAccounts.value = googleAccounts.value + it },
         syncChecker = { synced },
         collator = collator,
+        background = Dispatchers.Unconfined,
+        onFilter = { filterRuns++ },
     )
 
     private fun c(
@@ -199,5 +202,20 @@ class ContactListViewModelTest {
         device.delete(listOf(a.id))
         assertEquals(1, vm.state.value.selected.size)
         assertFalse(a.id in vm.state.value.selected)
+    }
+
+    @Test fun togglingSelectionDoesNotRefilter() = runTest {
+        val a = device.seed(c("Name 1"))
+        device.seed(c("Name 2"))
+        val vm = vm()
+        val items = vm.state.value.items
+        val runs = filterRuns
+        vm.toggleSelect(a.id)
+        vm.selectAll()
+        vm.clearSelection()
+        assertEquals(runs, filterRuns)
+        assertTrue(items === vm.state.value.items)
+        vm.setQuery("2") // a real filter change does re-run it
+        assertTrue(filterRuns > runs)
     }
 }

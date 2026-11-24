@@ -12,8 +12,14 @@ import com.ilukezippo.vcfdesk.data.SourceId
 import java.text.Collator
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -48,10 +54,11 @@ fun interface AccountSyncChecker {
 class SystemAccountSyncChecker(context: Context) : AccountSyncChecker {
     private val app = context.applicationContext
     override fun isSyncedOnPhone(email: String): Boolean = try {
-        AccountManager.get(app).getAccountsByType("com.google").any {
-            it.name.equals(email, ignoreCase = true) &&
-                ContentResolver.getSyncAutomatically(it, ContactsContract.AUTHORITY)
-        }
+        ContentResolver.getMasterSyncAutomatically() &&
+            AccountManager.get(app).getAccountsByType("com.google").any {
+                it.name.equals(email, ignoreCase = true) &&
+                    ContentResolver.getSyncAutomatically(it, ContactsContract.AUTHORITY)
+            }
     } catch (e: SecurityException) {
         false
     }
@@ -65,20 +72,36 @@ class ContactListViewModel(
     private val syncChecker: AccountSyncChecker,
     private val collator: Comparator<in String> = Collator.getInstance(Locale.getDefault()),
     initialSource: SourceId = SourceId.Device,
+    /** Where indexing, filtering, sorting and the sync check run (tests pass their own). */
+    private val background: CoroutineDispatcher = Dispatchers.Default,
+    /** Called each time the filter/sort stage runs (test hook). */
+    private val onFilter: () -> Unit = {},
 ) : ViewModel() {
 
+    /** Everything that changes which contacts are shown; selection is deliberately not in here. */
     private data class Controls(
         val source: SourceId,
         val query: String = "",
         val accountFilter: String? = null,
         val groupFilter: String? = null,
         val sortAsc: Boolean = true,
-        val selected: Set<String> = emptySet(),
     )
 
     private class Loaded(val source: SourceId, val contacts: List<Contact>, val loading: Boolean, val error: String? = null)
 
+    /** A load with the search text of each contact folded once. */
+    private class Indexed(val loaded: Loaded, val texts: List<Searching.Prepared>) {
+        val accounts = loaded.contacts.mapNotNull { it.account?.label?.takeIf(String::isNotEmpty) }.distinct()
+        val groups = loaded.contacts.flatMap { it.groups }.distinct()
+    }
+
+    private class View(
+        val source: SourceId, val query: String, val accountFilter: String?, val groupFilter: String?, val sortAsc: Boolean,
+        val items: List<Contact>, val accounts: List<String>, val groups: List<String>, val loading: Boolean, val error: String?,
+    )
+
     private val controls = MutableStateFlow(Controls(initialSource))
+    private val selected = MutableStateFlow<Set<String>>(emptySet())
     private val loaded = MutableStateFlow(Loaded(initialSource, emptyList(), loading = true))
     private val _state = MutableStateFlow(ListState(source = initialSource, sources = listOf(SourceId.Device)))
     val state: StateFlow<ListState> = _state
@@ -98,7 +121,7 @@ class ContactListViewModel(
                         sourceFor(c.source).contacts().collect { list ->
                             loaded.value = Loaded(c.source, list, loading = false)
                             val ids = list.mapTo(HashSet()) { it.id }
-                            controls.update { it.copy(selected = it.selected.filterTo(HashSet()) { id -> id in ids }) }
+                            selected.update { sel -> if (ids.containsAll(sel)) sel else sel.filterTo(HashSet()) { it in ids } }
                         }
                     } catch (e: CancellationException) {
                         throw e
@@ -108,35 +131,53 @@ class ContactListViewModel(
                 }
             }
         }
+
+        // Heavy part, off the main thread: fold search text once per load, then filter + sort.
+        val indexed = loaded.mapLatest { l -> Indexed(l, l.contacts.map(Searching::prepareContact)) }.flowOn(background)
+        val view = combine(controls, indexed) { c, ix -> filterAndSort(c, ix) }.flowOn(background)
+
+        // Source list and the "also on phone" check: only when the source or the account list changes.
+        val currentSource = controls.map { it.source }.distinctUntilChanged()
+        val sources = combine(currentSource, googleAccounts) { s, accounts ->
+            (listOf<SourceId>(SourceId.Device) + accounts.map { SourceId.Google(it) } + s).distinct()
+        }
+        val alsoOnPhone = combine(currentSource, googleAccounts) { s, _ ->
+            (s as? SourceId.Google)?.let { syncChecker.isSyncedOnPhone(it.email) } ?: false
+        }.flowOn(background)
+
         viewModelScope.launch {
-            combine(controls, loaded, googleAccounts) { c, l, accounts -> build(c, l, accounts) }
-                .collect { _state.value = it }
+            combine(view, selected, sources, alsoOnPhone) { v, sel, src, also ->
+                ListState(
+                    source = v.source, sources = src, query = v.query, accountFilter = v.accountFilter,
+                    groupFilter = v.groupFilter, sortAsc = v.sortAsc, items = v.items, selected = sel,
+                    loading = v.loading, alsoOnPhone = also, accounts = v.accounts, groups = v.groups, error = v.error,
+                )
+            }.collect { _state.value = it }
         }
     }
 
-    private fun build(c: Controls, l: Loaded, accounts: List<String>): ListState {
-        val all = if (l.source == c.source) l.contacts else emptyList()
+    private fun filterAndSort(c: Controls, ix: Indexed): View {
+        onFilter()
+        val l = ix.loaded
+        val current = l.source == c.source
         val q = Searching.prepare(c.query)
-        val filtered = all.filter {
-            (c.accountFilter == null || it.account?.label == c.accountFilter) &&
-                (c.groupFilter == null || c.groupFilter in it.groups) &&
-                Searching.matches(it, q)
+        val matching = ArrayList<Contact>()
+        if (current) {
+            for (i in l.contacts.indices) {
+                val it = l.contacts[i]
+                if ((c.accountFilter == null || it.account?.label == c.accountFilter) &&
+                    (c.groupFilter == null || c.groupFilter in it.groups) &&
+                    Searching.matches(ix.texts[i], q)
+                ) matching += it
+            }
         }
-        val sources = (listOf<SourceId>(SourceId.Device) + accounts.map { SourceId.Google(it) } + c.source).distinct()
-        return ListState(
-            source = c.source,
-            sources = sources,
-            query = c.query,
-            accountFilter = c.accountFilter,
-            groupFilter = c.groupFilter,
-            sortAsc = c.sortAsc,
-            items = sorted(filtered, c.sortAsc),
-            selected = c.selected,
-            loading = l.loading || l.source != c.source,
-            alsoOnPhone = (c.source as? SourceId.Google)?.let { syncChecker.isSyncedOnPhone(it.email) } ?: false,
-            accounts = all.mapNotNull { it.account?.label?.takeIf(String::isNotEmpty) }.distinct().sortedWith(collator),
-            groups = all.flatMap { it.groups }.distinct().sortedWith(collator),
-            error = l.error.takeIf { l.source == c.source },
+        return View(
+            source = c.source, query = c.query, accountFilter = c.accountFilter, groupFilter = c.groupFilter,
+            sortAsc = c.sortAsc, items = sorted(matching, c.sortAsc),
+            accounts = if (current) ix.accounts.sortedWith(collator) else emptyList(),
+            groups = if (current) ix.groups.sortedWith(collator) else emptyList(),
+            loading = l.loading || !current,
+            error = l.error.takeIf { current },
         )
     }
 
@@ -158,27 +199,25 @@ class ContactListViewModel(
     fun setGroupFilter(g: String?) = controls.update { it.copy(groupFilter = g) }
     fun toggleSort() = controls.update { it.copy(sortAsc = !it.sortAsc) }
 
-    fun toggleSelect(id: String) = controls.update {
-        it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id)
-    }
+    fun toggleSelect(id: String) = selected.update { if (id in it) it - id else it + id }
 
     fun selectAll() {
         val l = loaded.value
         if (l.source != controls.value.source) return
-        val ids = l.contacts.mapTo(LinkedHashSet()) { it.id }
-        controls.update { it.copy(selected = ids) }
+        selected.value = l.contacts.mapTo(LinkedHashSet()) { it.id }
     }
 
     fun selectResults() {
-        val ids = _state.value.items.mapTo(LinkedHashSet()) { it.id }
-        controls.update { it.copy(selected = ids) }
+        selected.value = _state.value.items.mapTo(LinkedHashSet()) { it.id }
     }
 
-    fun clearSelection() = controls.update { it.copy(selected = emptySet()) }
+    fun clearSelection() { selected.value = emptySet() }
 
-    fun switchSource(s: SourceId) = controls.update {
-        if (it.source == s) it
-        else it.copy(source = s, accountFilter = null, groupFilter = null, selected = emptySet())
+    fun switchSource(s: SourceId) {
+        selected.value = emptySet()
+        controls.update {
+            if (it.source == s) it else it.copy(source = s, accountFilter = null, groupFilter = null)
+        }
     }
 
     /** Remembers the (already authorised) Google account and shows it. */
@@ -203,10 +242,15 @@ internal object Searching {
         return Query(text, if (phoneLike) digitsOf(text) else "")
     }
 
-    fun matches(c: Contact, q: Query): Boolean {
+    /** A contact's searchable text, folded once per load. */
+    class Prepared(val phoneDigits: List<String>, val fields: List<String>)
+
+    fun prepareContact(c: Contact) = Prepared(c.phones.map { digitsOf(it.value) }, fields(c).map(::fold).toList())
+
+    fun matches(p: Prepared, q: Query): Boolean {
         if (q.text.isEmpty()) return true
-        if (q.digits.isNotEmpty() && c.phones.any { digitsOf(it.value).contains(q.digits) }) return true
-        return fields(c).any { fold(it).contains(q.text) }
+        if (q.digits.isNotEmpty() && p.phoneDigits.any { it.contains(q.digits) }) return true
+        return p.fields.any { it.contains(q.text) }
     }
 
     /** Lower-case, with every Unicode decimal digit turned into its ASCII digit. */

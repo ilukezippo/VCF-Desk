@@ -234,6 +234,13 @@ class ContactListViewModel(
 
     fun clearSelection() { selected.value = null }
 
+    /** The accounts the selected contacts are in, from everything loaded (not just what the filter shows). */
+    fun selectionAccounts(): Set<com.ilukezippo.vcfdesk.core.model.AccountTag?> {
+        val l = loaded.value
+        val ids = idsFor(selected.value, l.source)
+        return l.contacts.filter { it.id in ids }.mapTo(HashSet()) { it.account }
+    }
+
     fun switchSource(s: SourceId) {
         if (controls.value.source == s) return
         selected.value = null

@@ -166,7 +166,7 @@
     <string name="bulk_account_none">Phone only (no account)</string>
     <string name="bulk_copy">Copy</string>
     <string name="bulk_move">Move</string>
-    <string name="bulk_same_target">They are already there. Pick another place or account.</string>
+    <string name="bulk_same_target">Some of these contacts are already there. Pick another place or account.</string>
     <string name="bulk_preview">Preview</string>
     <string name="bulk_working">Working out the changes…</string>
 
@@ -179,10 +179,22 @@
     <string name="bulk_before">Before</string>
     <string name="bulk_after">After</string>
     <string name="bulk_empty_value">(empty)</string>
-    <string name="bulk_sum_delete">Delete %1$d contacts</string>
-    <string name="bulk_sum_copy">Copy %1$d contacts</string>
-    <string name="bulk_sum_move">Move %1$d contacts</string>
-    <string name="bulk_sum_dupes">Remove %1$d duplicate contacts</string>
+    <plurals name="bulk_sum_delete">
+        <item quantity="one">Delete %1$d contact</item>
+        <item quantity="other">Delete %1$d contacts</item>
+    </plurals>
+    <plurals name="bulk_sum_copy">
+        <item quantity="one">Copy %1$d contact</item>
+        <item quantity="other">Copy %1$d contacts</item>
+    </plurals>
+    <plurals name="bulk_sum_move">
+        <item quantity="one">Move %1$d contact</item>
+        <item quantity="other">Move %1$d contacts</item>
+    </plurals>
+    <plurals name="bulk_sum_dupes">
+        <item quantity="one">Remove %1$d duplicate contact</item>
+        <item quantity="other">Remove %1$d duplicate contacts</item>
+    </plurals>
     <string name="bulk_sum_dupes_kept">%1$d kept: they have data the other copy lacks</string>
     <plurals name="bulk_apply">
         <item quantity="one">Apply to %1$d contact</item>
@@ -208,11 +220,25 @@
 
     <string name="bulk_running">Working… %1$d of %2$d</string>
     <string name="bulk_stop">Stop</string>
-    <string name="bulk_cancelled">Stopped. %1$d of %2$d were processed before it stopped. Whatever was written is kept, and a backup was saved (see Backups).</string>
+    <string name="bulk_stopped_title">Stopped</string>
+    <string name="bulk_stopped">Stopped after %1$d of %2$d steps.</string>
+    <string name="bulk_stopped_backup">Whatever was already written is kept. Undo puts the contacts back as they were.</string>
+    <string name="bulk_stopped_nothing">Nothing was written.</string>
+    <string name="bulk_stopped_copies">Copies may already exist in %1$s. Undo does not remove them; delete them there if needed.</string>
+    <string name="bulk_copy_note">Copies can\'t be undone here. Delete them from %1$s if needed.</string>
     <string name="bulk_done_title">Done</string>
-    <string name="bulk_changed">%1$d changed</string>
-    <string name="bulk_skipped">%1$d skipped (read-only)</string>
-    <string name="bulk_failed_header">%1$d could not be changed</string>
+    <plurals name="bulk_changed">
+        <item quantity="one">%1$d contact changed</item>
+        <item quantity="other">%1$d contacts changed</item>
+    </plurals>
+    <plurals name="bulk_skipped">
+        <item quantity="one">%1$d skipped (read-only)</item>
+        <item quantity="other">%1$d skipped (read-only)</item>
+    </plurals>
+    <plurals name="bulk_failed_header">
+        <item quantity="one">%1$d contact could not be changed</item>
+        <item quantity="other">%1$d contacts could not be changed</item>
+    </plurals>
     <string name="bulk_no_backup">Nothing was written.</string>
     <string name="bulk_undo">Undo</string>
     <string name="bulk_undoing">Undoing…</string>

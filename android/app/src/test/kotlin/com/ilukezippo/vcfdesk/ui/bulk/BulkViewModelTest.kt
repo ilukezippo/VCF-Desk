@@ -122,10 +122,29 @@ class BulkViewModelTest {
 
         vm.cancel()
 
-        val s = vm.stage.value
-        assertEquals(Stage.Cancelled(2, 4), s)
+        val s = vm.stage.value as Stage.Cancelled
+        assertEquals(2, s.done); assertEquals(4, s.total)
+        assertNotNull(s.backup)
         assertEquals(listOf("New Co", "New Co", "Old Co", "Old Co"), fake.all().map { it.org.company })
         assertEquals(1, File(tmp.root, "backups").listFiles { f -> f.name.endsWith(".json") }!!.size) // backup kept
+    }
+
+    @Test
+    fun undoAfterCancelRestores() {
+        val fake = FakeSource()
+        val ids = (1..4).map { fake.seed(person(it)).id }
+        val gate = CompletableDeferred<Unit>()
+        val vm = vm(BatchedSource(fake, gate), ids)
+        vm.preview(setCompany)
+        vm.confirm()
+        vm.cancel()
+        gate.complete(Unit) // the undo's own writes must not wait
+        assertEquals(listOf("New Co", "New Co", "Old Co", "Old Co"), fake.all().map { it.org.company })
+
+        vm.undoLast()
+
+        assertEquals(2, (vm.stage.value as Stage.Cancelled).undone!!.changed)
+        assertTrue(fake.all().all { it.org.company == "Old Co" })
     }
 
     @Test

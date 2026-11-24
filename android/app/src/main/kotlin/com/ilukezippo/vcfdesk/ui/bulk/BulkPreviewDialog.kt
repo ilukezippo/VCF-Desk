@@ -143,13 +143,13 @@ private fun SummaryText(p: Stage.Preview, applicable: Int) {
             }
             Text(text, style = MaterialTheme.typography.bodyLarge.merge(TextStyle(textDirection = TextDirection.Content)))
         }
-        BulkOp.Delete -> Text(stringResource(R.string.bulk_sum_delete, n), style = MaterialTheme.typography.bodyLarge)
+        BulkOp.Delete -> Text(pluralStringResource(R.plurals.bulk_sum_delete, n, n), style = MaterialTheme.typography.bodyLarge)
         is BulkOp.CopyTo -> Text(
-            stringResource(if (op.move) R.string.bulk_sum_move else R.string.bulk_sum_copy, n),
+            pluralStringResource(if (op.move) R.plurals.bulk_sum_move else R.plurals.bulk_sum_copy, n, n),
             style = MaterialTheme.typography.bodyLarge,
         )
         BulkOp.RemoveExactDuplicates -> {
-            Text(stringResource(R.string.bulk_sum_dupes, applicable), style = MaterialTheme.typography.bodyLarge)
+            Text(pluralStringResource(R.plurals.bulk_sum_dupes, applicable, applicable), style = MaterialTheme.typography.bodyLarge)
             if (n > applicable) Text(stringResource(R.string.bulk_sum_dupes_kept, n - applicable), style = MaterialTheme.typography.bodyMedium)
         }
     }
@@ -173,11 +173,7 @@ fun BulkStageDialogs(vm: BulkViewModel, onFinished: () -> Unit) {
             text = { LinearProgressIndicator(progress = { if (s.total == 0) 0f else s.done.toFloat() / s.total }, modifier = Modifier.fillMaxWidth()) },
             confirmButton = { TextButton(onClick = vm::cancel) { Text(stringResource(R.string.bulk_stop)) } },
         )
-        is Stage.Cancelled -> AlertDialog(
-            onDismissRequest = {},
-            text = { Text(stringResource(R.string.bulk_cancelled, s.done, s.total)) },
-            confirmButton = { TextButton(onClick = { vm.close(); onFinished() }) { Text(stringResource(R.string.bulk_close)) } },
-        )
+        is Stage.Cancelled -> CancelledDialog(s, onUndo = vm::undoLast, onClose = { vm.close(); onFinished() })
         is Stage.Done -> DoneDialog(s, onUndo = vm::undoLast, onClose = { vm.close(); onFinished() })
         is Stage.Error -> AlertDialog(
             onDismissRequest = vm::close,
@@ -197,9 +193,12 @@ private fun DoneDialog(s: Stage.Done, onUndo: () -> Unit, onClose: () -> Unit) {
         title = { Text(stringResource(R.string.bulk_done_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.bulk_changed, r.changed), style = MaterialTheme.typography.bodyLarge)
-                if (r.skippedReadOnly > 0) Text(stringResource(R.string.bulk_skipped, r.skippedReadOnly))
-                if (r.backup == null) Text(stringResource(R.string.bulk_no_backup))
+                Text(pluralStringResource(R.plurals.bulk_changed, r.changed, r.changed), style = MaterialTheme.typography.bodyLarge)
+                if (r.skippedReadOnly > 0) Text(pluralStringResource(R.plurals.bulk_skipped, r.skippedReadOnly, r.skippedReadOnly))
+                if (r.changed == 0) Text(stringResource(R.string.bulk_no_backup))
+                else if (r.backup == null && s.copiedTo != null) {
+                    Text(stringResource(R.string.bulk_copy_note, placeName(s.copiedTo)))
+                }
                 Failures(r.failed, s.names)
                 s.undone?.let { u ->
                     HorizontalDivider()
@@ -225,7 +224,7 @@ private fun DoneDialog(s: Stage.Done, onUndo: () -> Unit, onClose: () -> Unit) {
 @Composable
 private fun Failures(failed: Map<String, String>, names: Map<String, String>) {
     if (failed.isEmpty()) return
-    Text(stringResource(R.string.bulk_failed_header, failed.size), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
+    Text(pluralStringResource(R.plurals.bulk_failed_header, failed.size, failed.size), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
     LazyColumn(Modifier.heightIn(max = 200.dp)) {
         items(failed.entries.toList()) { (id, why) ->
             Text(
@@ -235,4 +234,42 @@ private fun Failures(failed: Map<String, String>, names: Map<String, String>) {
             )
         }
     }
+}
+
+@Composable
+private fun placeName(id: com.ilukezippo.vcfdesk.data.SourceId): String = when (id) {
+    com.ilukezippo.vcfdesk.data.SourceId.Device -> stringResource(R.string.source_device)
+    is com.ilukezippo.vcfdesk.data.SourceId.Google -> id.email
+}
+
+@Composable
+private fun CancelledDialog(s: Stage.Cancelled, onUndo: () -> Unit, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = { Text(stringResource(R.string.bulk_stopped_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(stringResource(R.string.bulk_stopped, s.done, s.total))
+                Text(stringResource(if (s.backup != null) R.string.bulk_stopped_backup else R.string.bulk_stopped_nothing))
+                s.movedTo?.let { Text(stringResource(R.string.bulk_stopped_copies, placeName(it))) }
+                s.undone?.let { u ->
+                    HorizontalDivider()
+                    Text(stringResource(R.string.bulk_undone, u.changed), style = MaterialTheme.typography.bodyLarge)
+                    Failures(u.failed, emptyMap())
+                }
+                s.undoError?.let { Text(stringResource(R.string.bulk_undo_failed, it), color = MaterialTheme.colorScheme.error) }
+                if (s.undoing) {
+                    Text(stringResource(R.string.bulk_undoing))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose, enabled = !s.undoing) { Text(stringResource(R.string.bulk_close)) } },
+        dismissButton = {
+            TextButton(onClick = onUndo, enabled = s.backup != null && !s.undoing && s.undone == null) {
+                Text(stringResource(R.string.bulk_undo))
+            }
+        },
+    )
 }

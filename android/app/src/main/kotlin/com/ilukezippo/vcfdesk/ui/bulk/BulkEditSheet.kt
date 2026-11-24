@@ -117,7 +117,7 @@ fun BulkEditSheet(
     vm: BulkViewModel,
     groups: List<String>,
     googleSources: List<SourceId.Google>,
-    /** The accounts the selected contacts are in (null entry: no account). */
+    /** The accounts of ALL selected contacts (null entry: no account), even those the list filter hides. */
     selectionAccounts: Set<AccountTag?>,
     sourceFor: (SourceId) -> ContactSource,
     deviceAccounts: List<AccountTag> = writableDeviceAccounts(LocalContext.current),
@@ -319,7 +319,7 @@ private fun CopyMoveForm(
     }
     // the exact same place the contacts are already in
     val same = targetSource == current && (targetSource is SourceId.Google ||
-        (selectionAccounts.size == 1 && sameAccount(selectionAccounts.first(), account)))
+        selectionAccounts.any { sameAccount(it, account) })
     if (same) Text(stringResource(R.string.bulk_same_target), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
     Button(enabled = enabled && !same, onClick = { onPreview(BulkOp.CopyTo(sourceFor(targetSource), account, move)) }) {
         Text(stringResource(R.string.bulk_preview))

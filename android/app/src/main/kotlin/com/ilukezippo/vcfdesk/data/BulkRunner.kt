@@ -68,7 +68,7 @@ class BulkRunner(private val store: BackupStore) {
         }
     }
 
-    suspend fun run(src: ContactSource, ids: List<String>, op: BulkOp, progress: (Int, Int) -> Unit): BulkReport {
+    suspend fun run(src: ContactSource, ids: List<String>, op: BulkOp, onBackup: (Backup) -> Unit = {}, progress: (Int, Int) -> Unit): BulkReport {
         val loaded = loadAll(src, ids)
         val t = Tally()
         t.failed.putAll(loaded.failed)
@@ -79,6 +79,7 @@ class BulkRunner(private val store: BackupStore) {
                 if (diffs.isEmpty()) return t.report(null)
                 val backup = backupOrAbort(diffs.map { it.contact }, "edit", src.id, ids, t, diffs.map { it.after })
                     ?: return t.report(null)
+                onBackup(backup)
                 val total = diffs.size
                 progress(0, total)
                 val res = src.update(diffs.map { it.after }) { progress(it, total) }
@@ -86,15 +87,15 @@ class BulkRunner(private val store: BackupStore) {
                 recordActual(src, backup, res.written)
                 return t.report(backup)
             }
-            BulkOp.Delete -> return deleteWithBackup(src, cs, ids, t, progress)
+            BulkOp.Delete -> return deleteWithBackup(src, cs, ids, t, progress, onBackup)
             BulkOp.RemoveExactDuplicates -> {
                 val dups = duplicates(cs)
                 dups.filter { it.lacks.isNotEmpty() }.forEach {
                     t.failed[it.contact.id] = "kept: has ${it.lacks.joinToString(", ")} the other copy lacks"
                 }
-                return deleteWithBackup(src, dups.filter { it.lacks.isEmpty() }.map { it.contact }, ids, t, progress)
+                return deleteWithBackup(src, dups.filter { it.lacks.isEmpty() }.map { it.contact }, ids, t, progress, onBackup)
             }
-            is BulkOp.CopyTo -> return copy(src, cs, ids, op, t, progress)
+            is BulkOp.CopyTo -> return copy(src, cs, ids, op, t, progress, onBackup)
         }
     }
 
@@ -249,9 +250,11 @@ class BulkRunner(private val store: BackupStore) {
 
     private suspend fun deleteWithBackup(
         src: ContactSource, cs: List<Contact>, ids: List<String>, t: Tally, progress: (Int, Int) -> Unit,
+        onBackup: (Backup) -> Unit = {},
     ): BulkReport {
         if (cs.isEmpty()) return t.report(null)
         val backup = backupOrAbort(cs, "delete", src.id, ids, t) ?: return t.report(null)
+        onBackup(backup)
         val total = cs.size
         progress(0, total)
         // only what was loaded, and so backed up, is deleted
@@ -273,9 +276,11 @@ class BulkRunner(private val store: BackupStore) {
 
     private suspend fun copy(
         src: ContactSource, cs: List<Contact>, ids: List<String>, op: BulkOp.CopyTo, t: Tally, progress: (Int, Int) -> Unit,
+        onBackup: (Backup) -> Unit = {},
     ): BulkReport {
         if (cs.isEmpty()) return t.report(null)
         val backup = if (op.move) backupOrAbort(cs, "move", src.id, ids, t) ?: return t.report(null) else null
+        if (backup != null) onBackup(backup)
         val total = if (op.move) cs.size * 2 else cs.size
         progress(0, total)
         // ids stay on the copies only so the target can key its failures by them

@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
                                             vm = bulk,
                                             groups = listState.groups,
                                             googleSources = listState.sources.filterIsInstance<SourceId.Google>(),
-                                            selectionAccounts = listState.items.filter { it.id in content.ids }.mapTo(HashSet()) { it.account },
+                                            selectionAccounts = remember(listState.selected, listState.source, listState.items) { vm.selectionAccounts() },
                                             sourceFor = container::source,
                                         )
                                     } else {

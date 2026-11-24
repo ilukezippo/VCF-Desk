@@ -8,6 +8,7 @@ import com.ilukezippo.vcfdesk.data.BulkReport
 import com.ilukezippo.vcfdesk.data.BulkRunner
 import com.ilukezippo.vcfdesk.data.ContactSource
 import com.ilukezippo.vcfdesk.data.SourceId
+import com.ilukezippo.vcfdesk.data.backup.Backup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,17 @@ sealed interface Stage {
     data class Preview(val op: BulkOp, val diffs: List<ContactDiff>, val finalConfirm: Boolean = false) : Stage
     data class Running(val done: Int, val total: Int) : Stage
     /** Stopped by the user; what was written before is kept, with its backup. */
-    data class Cancelled(val done: Int, val total: Int) : Stage
+    data class Cancelled(
+        val done: Int,
+        val total: Int,
+        /** The backup taken before writing, if the run got that far; undo uses it. */
+        val backup: Backup? = null,
+        /** For a move: where copies may have been made (and are not removed by undo if unrecorded). */
+        val movedTo: SourceId? = null,
+        val undoing: Boolean = false,
+        val undone: BulkReport? = null,
+        val undoError: String? = null,
+    ) : Stage
     /** [undone] is the result of undoing; [undoError] says why an undo could not run. */
     data class Done(
         val report: BulkReport,
@@ -36,6 +47,8 @@ sealed interface Stage {
         val undoError: String? = null,
         /** Contact id to display name, for listing failures by name. */
         val names: Map<String, String> = emptyMap(),
+        /** For a plain copy: where the copies went (no backup is taken; they can't be undone here). */
+        val copiedTo: SourceId? = null,
     ) : Stage
     data class Error(val message: String) : Stage
 }
@@ -70,6 +83,9 @@ class BulkViewModel(
 
     @Volatile private var done = 0
     @Volatile private var total = 0
+    @Volatile private var lastBackup: Backup? = null
+    private var movedTo: SourceId? = null
+    private var copiedTo: SourceId? = null
 
     init {
         viewModelScope.launch { countryCode.collect { _country.value = it } }
@@ -102,22 +118,24 @@ class BulkViewModel(
             _stage.value = s.copy(finalConfirm = true)
             return
         }
-        done = 0; total = ids.size
+        done = 0; total = ids.size; lastBackup = null
+        movedTo = (s.op as? BulkOp.CopyTo)?.takeIf { it.move }?.target?.id
+        copiedTo = (s.op as? BulkOp.CopyTo)?.takeIf { !it.move }?.target?.id
         _stage.value = Stage.Running(0, total)
         val names = s.diffs.associate { it.contact.id to displayName(it.contact) }
         undoTarget = (s.op as? BulkOp.CopyTo)?.takeIf { it.move }?.target
         job = viewModelScope.launch {
             try {
                 val report = withContext(background) {
-                    runner.run(source, ids, s.op) { d, t ->
+                    runner.run(source, ids, s.op, onBackup = { lastBackup = it }) { d, t ->
                         done = d; total = t
                         // a late tick after cancelling must not bring the progress state back
                         _stage.update { if (it is Stage.Running) Stage.Running(d, t) else it }
                     }
                 }
-                _stage.value = Stage.Done(report, names = names)
+                _stage.value = Stage.Done(report, names = names, copiedTo = copiedTo)
             } catch (e: CancellationException) {
-                _stage.value = Stage.Cancelled(done, total)
+                _stage.value = Stage.Cancelled(done, total, lastBackup, movedTo)
                 throw e
             } catch (e: Exception) {
                 _stage.value = Stage.Error(e.message ?: e.javaClass.simpleName)
@@ -131,18 +149,31 @@ class BulkViewModel(
     }
 
     fun undoLast() {
-        val d = _stage.value as? Stage.Done ?: return
-        val backup = d.report.backup ?: return
-        if (d.undoing || d.undone != null) return
-        _stage.value = d.copy(undoing = true, undoError = null)
+        when (val d = _stage.value) {
+            is Stage.Done -> {
+                val backup = d.report.backup ?: return
+                if (d.undoing || d.undone != null) return
+                _stage.value = d.copy(undoing = true, undoError = null)
+                undo(backup, { _stage.value = d.copy(undoing = false, undone = it) }, { _stage.value = d.copy(undoing = false, undoError = it) })
+            }
+            is Stage.Cancelled -> {
+                val backup = d.backup ?: return
+                if (d.undoing || d.undone != null) return
+                _stage.value = d.copy(undoing = true, undoError = null)
+                undo(backup, { _stage.value = d.copy(undoing = false, undone = it) }, { _stage.value = d.copy(undoing = false, undoError = it) })
+            }
+            else -> {}
+        }
+    }
+
+    private fun undo(backup: Backup, ok: (BulkReport) -> Unit, err: (String) -> Unit) {
         job = viewModelScope.launch {
             try {
-                val r = withContext(background) { runner.undo(source, backup, undoTarget) }
-                _stage.value = d.copy(undoing = false, undone = r)
+                ok(withContext(background) { runner.undo(source, backup, undoTarget) })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _stage.value = d.copy(undoing = false, undoError = e.message ?: e.javaClass.simpleName)
+                err(e.message ?: e.javaClass.simpleName)
             }
         }
     }

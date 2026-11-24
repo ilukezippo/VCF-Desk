@@ -5,6 +5,11 @@ on:
     paths: ["android/**", ".github/workflows/android.yml"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the APK to (for example v1.0). Leave empty to only build."
+        required: false
+        type: string
 
 permissions:
   contents: write          # lets a tag build attach the APK to its release
@@ -39,13 +44,14 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [ -n "$ANDROID_KEYSTORE_B64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
             echo "signed=true" >> "$GITHUB_OUTPUT"
             echo "Signing secrets found: building a signed release APK"
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
-            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]] || [ -n "$INPUT_TAG" ]; then
               echo "::warning::Signing secrets not set: built an unsigned debug APK, nothing will be attached to the release"
             else
               echo "::notice::Signing secrets not set: building an unsigned debug APK (artifact only)"
@@ -96,22 +102,27 @@ jobs:
           retention-days: 7
       - name: Check the release exists
         id: rel
-        if: startsWith(github.ref, 'refs/tags/') && steps.sign.outputs.signed == 'true'
+        # a tag push, or a manual run from main with the "tag" input filled in
+        # (older tags such as v1.0 predate this workflow, so they can't be run directly)
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.tag != '') && steps.sign.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           # never create a release here: the Windows workflow owns it
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Release $TAG does not exist yet: wait for the Windows build to publish it, then run this workflow again on the tag"
+            echo "::warning::Release $TAG does not exist yet: wait for the Windows build to publish it, then run this workflow again"
           fi
       - name: Attach the APK to the release
-        # only adds this one file; other release assets are left alone
+        # only adds (or replaces) this one file; other release assets are left alone
         if: steps.rel.outputs.exists == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: ${{ steps.apk.outputs.path }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          APK: ${{ steps.apk.outputs.path }}
+        working-directory: .
+        run: gh release upload "$TAG" "$APK" --clobber --repo "$GITHUB_REPOSITORY"

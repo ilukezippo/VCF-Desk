@@ -43,8 +43,8 @@ keytool -list -v -keystore vcfdesk-release.jks -alias vcfdesk
 
 The Windows workflow creates the `v1.0` release. Once it exists:
 
-1. GitHub -> **Actions -> Build Android app -> Run workflow**, choose the tag `v1.0` in "Use workflow from", and run it.
+1. GitHub -> **Actions -> Build Android app -> Run workflow**. Leave "Use workflow from" on the branch `main`, type `v1.0` in the **tag** box, and run it. (The `v1.0` tag is older than the Android workflow, so it can't be picked in "Use workflow from"; the app is built from `main` and attached to the tag's release.)
 2. It tests, builds the signed APK and attaches `VCF-Desk-Android-1.0.apk` to the existing release. Other release files are not touched. If the secrets are missing the run only warns and skips the upload; if the release doesn't exist yet it stops without creating one.
 3. Check that the download link in the README works.
 
-For a later version, raise `versionCode` and `versionName` in `android/app/build.gradle.kts`, wait for the matching release to exist, and run the workflow on its tag.
+For a later version, raise `versionCode` and `versionName` in `android/app/build.gradle.kts`, wait for the matching release to exist, and run the workflow from `main` with that tag in the **tag** box (or push a new tag, which runs it automatically).

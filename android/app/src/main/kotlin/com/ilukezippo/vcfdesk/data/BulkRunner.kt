@@ -14,6 +14,7 @@ import com.ilukezippo.vcfdesk.data.backup.Backup
 import com.ilukezippo.vcfdesk.data.backup.BackupEntry
 import com.ilukezippo.vcfdesk.data.backup.BackupStore
 import com.ilukezippo.vcfdesk.data.backup.MoveRecord
+import com.ilukezippo.vcfdesk.data.google.PeopleMapper
 import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -173,6 +174,7 @@ class BulkRunner(private val store: BackupStore) {
         var r = cur
         val conflicts = ArrayList<String>()
         fun <T> field(label: String, get: (Contact) -> T, set: Contact.(T) -> Contact) {
+            if (get(before) == get(after)) return // the edit didn't touch it: nothing to restore, no conflict
             val now = get(cur)
             when (now) {
                 get(before) -> {}
@@ -193,7 +195,7 @@ class BulkRunner(private val store: BackupStore) {
         field("groups", { it.groups }) { copy(groups = it) }
         val p = sha(cur.photo)
         when {
-            p == e.beforePhoto -> {}
+            e.beforePhoto == e.afterPhoto || p == e.beforePhoto -> {}
             p == e.afterPhoto && before.photo != null -> r = r.copy(photo = before.photo, thumbnail = null)
             else -> conflicts += "photo"
         }
@@ -383,8 +385,9 @@ class BulkRunner(private val store: BackupStore) {
         if (c.notes.isNotBlank() && !k.notes.contains(c.notes.trim())) out += "notes"
         if (!k.groups.containsAll(c.groups)) out += "groups"
         if (c.photo?.isNotEmpty() == true && k.photo?.isNotEmpty() != true) out += "photo"
-        // source data the model doesn't know (the Google person JSON is per contact and never comparable)
-        if (c.extras.any { it.kind != "google" && it !in k.extras }) out += "other data"
+        // source data the model doesn't know; the Google person JSON is compared key by key
+        if (c.extras.any { it.kind != PeopleMapper.EXTRA_KIND && it !in k.extras }) out += "other data"
+        if (PeopleMapper.hasUnmodelledDataMissingFrom(c, k)) out += "other Google data"
         return out
     }
 

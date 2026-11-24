@@ -420,4 +420,51 @@ class BulkRunnerTest {
         val removed = target.log.indexOfFirst { it.startsWith("delete") }
         assertTrue(created >= 0 && removed >= 0)
     }
+
+    private fun googleDup(n: Int, extraJson: String, notes: String = "") = person(1).copy(
+        account = AccountTag("com.google", "me@example.com", "me@example.com", false),
+        notes = notes,
+        extras = listOf(com.ilukezippo.vcfdesk.core.model.Extra("google",
+            """{"resourceName":"people/c$n","etag":"e$n","metadata":{"sources":[{"id":"$n"}]},""" +
+                """"names":[{"metadata":{"primary":true},"givenName":"Name","familyName":"1"}],""" +
+                """"phoneNumbers":[{"metadata":{"primary":true},"value":"55555551","canonicalForm":"+96555555551"}]""" +
+                extraJson + "}")),
+    )
+
+    @Test
+    fun googleDuplicateWithUnmodelledDataIsKept() = runTest {
+        val src = FakeSource(SourceId.Google("me@example.com"))
+        val keeper = src.seed(googleDup(1, "", notes = "richer"))
+        val unique = src.seed(googleDup(2, ""","userDefined":[{"metadata":{"source":{"id":"2"}},"key":"Badge","value":"55555555"}]"""))
+        val runner = BulkRunner(BackupStore(dir()))
+        val pv = runner.preview(src, listOf(keeper.id, unique.id), BulkOp.RemoveExactDuplicates).single()
+        assertEquals("kept — has other Google data the other copy lacks", pv.changes.single().after)
+        runner.run(src, listOf(keeper.id, unique.id), BulkOp.RemoveExactDuplicates) { _, _ -> }
+        assertEquals(2, src.all().size)
+    }
+
+    @Test
+    fun googleDuplicateWithSameUnmodelledDataIsRemoved() = runTest {
+        val src = FakeSource(SourceId.Google("me@example.com"))
+        val ud = { n: Int -> ""","userDefined":[{"metadata":{"source":{"id":"$n"}},"key":"Badge","value":"55555555"}]""" }
+        val keeper = src.seed(googleDup(1, ud(1), notes = "richer"))
+        val same = src.seed(googleDup(2, ud(2)))
+        val r = BulkRunner(BackupStore(dir())).run(src, listOf(keeper.id, same.id), BulkOp.RemoveExactDuplicates) { _, _ -> }
+        assertEquals(1, r.changed)
+        assertEquals(listOf(keeper.id), src.all().map { it.id })
+    }
+
+    @Test
+    fun fieldTheEditDidNotChangeIsNeverAConflict() = runTest {
+        val src = FakeSource()
+        val c = src.seed(person(1))
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, listOf(c.id), edit) { _, _ -> }
+        val fresh = src.load(c.id)
+        src.update(listOf(fresh.copy(notes = "added later")))
+        val u = runner.undo(src, r.backup!!)
+        assertEquals(emptyMap<String, String>(), u.failed)
+        assertEquals("Old Co", src.get(c.id)!!.org.company)
+        assertEquals("added later", src.get(c.id)!!.notes)
+    }
 }

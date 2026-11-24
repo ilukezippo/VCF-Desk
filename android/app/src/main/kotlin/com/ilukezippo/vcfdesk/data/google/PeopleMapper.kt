@@ -227,6 +227,45 @@ object PeopleMapper {
             .firstOrNull { it.s("resourceName") == c.id }
     }
 
+    // ---- unmodelled data (duplicate removal) ----
+
+    /** Keys that belong to one person record, not to the contact's data. */
+    private val PER_CONTACT = setOf("resourceName", "etag", "metadata", "photos", "coverPhotos", "memberships")
+
+    /** Keys whose every entry the model reads. */
+    private val FULLY_MODELLED = setOf(
+        "phoneNumbers", "emailAddresses", "addresses", "urls", "birthdays", "events", "relations", "imClients",
+    )
+
+    /** Keys of which the model reads one entry only; any further entries are unmodelled data. */
+    private val ONE_MODELLED = setOf("names", "organizations", "nicknames", "biographies")
+
+    private fun stripMeta(e: JsonElement): JsonElement = if (e is JsonObject) JsonObject(e - "metadata") else e
+
+    /**
+     * True when [c]'s Google person holds data the model doesn't show (custom fields, occupations,
+     * extra names, ...) that [keeper]'s person lacks. Entries are compared without their `metadata`.
+     */
+    fun hasUnmodelledDataMissingFrom(c: Contact, keeper: Contact): Boolean {
+        val mine = c.extras.filter { it.kind == EXTRA_KIND }
+            .mapNotNull { runCatching { Json.parseToJsonElement(it.raw) as? JsonObject }.getOrNull() }
+        if (mine.isEmpty()) return false
+        val theirs = keeper.extras.filter { it.kind == EXTRA_KIND }
+            .mapNotNull { runCatching { Json.parseToJsonElement(it.raw) as? JsonObject }.getOrNull() }
+        for (p in mine) for ((key, value) in p) {
+            if (key in PER_CONTACT || key in FULLY_MODELLED) continue
+            val other = theirs.mapNotNull { it[key] }
+            if (value is JsonArray) {
+                if (key in ONE_MODELLED && value.size <= 1) continue
+                val pool = other.flatMap { (it as? JsonArray)?.toList() ?: listOf(it) }.map(::stripMeta)
+                if (value.any { stripMeta(it) !in pool }) return true
+            } else if (key !in ONE_MODELLED && other.none { stripMeta(it) == stripMeta(value) }) {
+                return true
+            }
+        }
+        return false
+    }
+
     // ---- comparing ----
 
     private fun nameKey(n: Name) = listOf(n.prefix, n.first, n.middle, n.last, n.suffix, n.phoneticFirst, n.phoneticLast, n.display)

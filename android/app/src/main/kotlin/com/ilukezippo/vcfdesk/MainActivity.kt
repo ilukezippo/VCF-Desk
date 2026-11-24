@@ -72,15 +72,33 @@ class MainActivity : ComponentActivity() {
                         val holderVm: EditorHolderViewModel = viewModel(factory = EditorHolderFactory(container))
                         val holder = holderVm.holder
                         val pending by holder.pendingSwitch.collectAsStateWithLifecycle()
+                        var openRequest by remember { mutableStateOf<String?>(null) }
+                        val discard = {
+                            val t = holder.confirmDiscard()
+                            if (t is EditorHolder.PendingTarget.OpenContact) openRequest = t.id
+                        }
+                        val keep = {
+                            when (val t = holder.keepEditing()) {
+                                EditorHolder.PendingTarget.Selection -> vm.clearSelection()
+                                is EditorHolder.PendingTarget.SourceSwitch -> vm.switchSource(t.back)
+                                else -> {}
+                            }
+                        }
                         AppScaffold(
                             vm = vm,
                             actions = actions,
                             pickGoogleAccount = { pickAndAuthorise(auth) },
-                            beforeOpen = { id, proceed ->
+                            beforeOpen = { id ->
                                 val cur = holder.current.value
-                                if (cur != null && cur.id == id && cur.source == vm.state.value.source) proceed()
-                                else holder.requestSwitch(proceed = proceed)
+                                (cur != null && cur.id == id && cur.source == vm.state.value.source) ||
+                                    holder.requestSwitch(EditorHolder.PendingTarget.OpenContact(id))
                             },
+                            keepOpen = { id ->
+                                val cur = holder.current.value
+                                cur != null && cur.id == id && cur.source == vm.state.value.source
+                            },
+                            openRequest = openRequest,
+                            onOpenRequestHandled = { openRequest = null },
                             detail = { content, onClose ->
                                 if (content is DetailContent.Contact) {
                                     val editor = holder.open(vm.state.value.source, content.id)
@@ -89,10 +107,15 @@ class MainActivity : ComponentActivity() {
                                     // the contact was left some other way (selection, source change): drop a clean editor, ask about a dirty one
                                     LaunchedEffect(content) {
                                         val open = holder.current.value
-                                        if (open != null) holder.requestSwitch(onKeep = {
-                                            if (content is DetailContent.Selection) vm.clearSelection()
-                                            else if (vm.state.value.source != open.source) vm.switchSource(open.source)
-                                        }) {}
+                                        if (open != null) {
+                                            holder.requestSwitch(
+                                                when {
+                                                    content is DetailContent.Selection -> EditorHolder.PendingTarget.Selection
+                                                    vm.state.value.source != open.source -> EditorHolder.PendingTarget.SourceSwitch(open.source)
+                                                    else -> EditorHolder.PendingTarget.Leave
+                                                },
+                                            )
+                                        }
                                     }
                                     DefaultDetail(content, actions)
                                 }
@@ -100,11 +123,11 @@ class MainActivity : ComponentActivity() {
                         )
                         if (pending != null) {
                             AlertDialog(
-                                onDismissRequest = holder::keepEditing,
+                                onDismissRequest = keep,
                                 title = { Text(stringResource(R.string.editor_discard_title)) },
                                 text = { Text(stringResource(R.string.editor_discard_body)) },
-                                confirmButton = { TextButton(onClick = holder::confirmDiscard) { Text(stringResource(R.string.editor_discard)) } },
-                                dismissButton = { TextButton(onClick = holder::keepEditing) { Text(stringResource(R.string.editor_keep_editing)) } },
+                                confirmButton = { TextButton(onClick = discard) { Text(stringResource(R.string.editor_discard)) } },
+                                dismissButton = { TextButton(onClick = keep) { Text(stringResource(R.string.editor_keep_editing)) } },
                             )
                         }
                     }

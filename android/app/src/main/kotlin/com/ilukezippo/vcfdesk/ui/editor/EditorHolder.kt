@@ -17,10 +17,19 @@ class EditorHolder(private val create: (SourceId, String) -> ContactEditorViewMo
     private val _current = MutableStateFlow<Open?>(null)
     val current: StateFlow<Open?> = _current.asStateFlow()
 
+    /** Where the user was going when a dirty editor stopped them; plain data, so it survives rotation. */
+    sealed interface PendingTarget {
+        data class OpenContact(val id: String) : PendingTarget
+        /** A selection started (already happened). */
+        data object Selection : PendingTarget
+        /** The source changed (already happened); [back] is the editor's source. */
+        data class SourceSwitch(val back: SourceId) : PendingTarget
+        data object Leave : PendingTarget
+    }
+
     /** Set while the user is being asked whether to discard; [confirmDiscard] and [keepEditing] resolve it. */
-    class Pending(val proceed: () -> Unit, val onKeep: () -> Unit)
-    private val _pending = MutableStateFlow<Pending?>(null)
-    val pendingSwitch: StateFlow<Pending?> = _pending.asStateFlow()
+    private val _pending = MutableStateFlow<PendingTarget?>(null)
+    val pendingSwitch: StateFlow<PendingTarget?> = _pending.asStateFlow()
 
     val isDirty: Boolean get() = _current.value?.editor?.isDirty?.value == true
 
@@ -42,24 +51,28 @@ class EditorHolder(private val create: (SourceId, String) -> ContactEditorViewMo
     }
 
     /**
-     * Runs [proceed] to move away from the open editor. Clean (or no) editors are closed and [proceed] runs at once;
-     * a dirty one makes the switch wait for [confirmDiscard] / [keepEditing] ([onKeep] undoes a move that already happened).
+     * Asks to move away from the open editor towards [target]. A clean (or no) editor is closed and true is returned:
+     * go ahead. A dirty one stays, [target] becomes pending and false is returned; the caller shows the dialog and
+     * resolves it with [confirmDiscard] / [keepEditing], which return the target to act on.
      */
-    fun requestSwitch(onKeep: () -> Unit = {}, proceed: () -> Unit) {
-        if (!isDirty) { close(); proceed(); return }
-        if (_pending.value == null) _pending.value = Pending(proceed, onKeep)
+    fun requestSwitch(target: PendingTarget): Boolean {
+        if (!isDirty) { close(); return true }
+        if (_pending.value == null) _pending.value = target
+        return false
     }
 
-    fun confirmDiscard() {
-        val p = _pending.value
+    /** Drops the editor and its edits; returns where the user was going. */
+    fun confirmDiscard(): PendingTarget? {
+        val t = _pending.value
         close()
-        p?.proceed?.invoke()
+        return t
     }
 
-    fun keepEditing() {
-        val p = _pending.value
+    /** Keeps the editor; returns where the user was going, so a move that already happened can be undone. */
+    fun keepEditing(): PendingTarget? {
+        val t = _pending.value
         _pending.value = null
-        p?.onKeep?.invoke()
+        return t
     }
 }
 

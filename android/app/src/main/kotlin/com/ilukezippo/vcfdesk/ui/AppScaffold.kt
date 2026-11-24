@@ -64,8 +64,13 @@ fun AppScaffold(
     actions: AppActions,
     /** Runs the Google account chooser + consent; returns the email, or null if the user backed out. Throws on failure. */
     pickGoogleAccount: suspend () -> String?,
-    /** Called before another contact is opened; run `proceed` to open it (the editor may ask to discard edits first). */
-    beforeOpen: (id: String, proceed: () -> Unit) -> Unit = { _, proceed -> proceed() },
+    /** Asked before another contact is opened; false means "not now" (the editor asks about unsaved edits first). */
+    beforeOpen: (id: String) -> Boolean = { true },
+    /** True for a contact whose detail must stay shown even if the list filter hides it (an open editor). */
+    keepOpen: (id: String) -> Boolean = { false },
+    /** A contact to open later (after the user agreed to discard); [onOpenRequestHandled] is called once it is opened. */
+    openRequest: String? = null,
+    onOpenRequestHandled: () -> Unit = {},
     detail: @Composable (DetailContent, onClose: () -> Unit) -> Unit = { content, _ -> DefaultDetail(content, actions) },
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -78,7 +83,7 @@ fun AppScaffold(
     val openId = navigator.currentDestination?.contentKey?.takeIf { it.isNotEmpty() }
     val content: DetailContent = when {
         state.selected.isNotEmpty() -> DetailContent.Selection(state.selected)
-        openId != null && state.items.any { it.id == openId } -> DetailContent.Contact(openId)
+        openId != null && (state.items.any { it.id == openId } || keepOpen(openId)) -> DetailContent.Contact(openId)
         else -> DetailContent.None
     }
 
@@ -87,6 +92,13 @@ fun AppScaffold(
     LaunchedEffect(state.selected.isEmpty()) {
         if (state.selected.isEmpty() && navigator.currentDestination?.contentKey == BULK) {
             navigator.navigateTo(ListDetailPaneScaffoldRole.List)
+        }
+    }
+
+    LaunchedEffect(openRequest) {
+        if (openRequest != null) {
+            navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, openRequest)
+            onOpenRequestHandled()
         }
     }
 
@@ -113,7 +125,7 @@ fun AppScaffold(
                         vm = vm,
                         actions = actions,
                         openId = openId,
-                        onOpen = { id -> beforeOpen(id) { scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, id) } } },
+                        onOpen = { id -> if (beforeOpen(id)) scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, id) } },
                         onEditSelected = {
                             actions.onEditSelected(state.selected)
                             scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, BULK) }

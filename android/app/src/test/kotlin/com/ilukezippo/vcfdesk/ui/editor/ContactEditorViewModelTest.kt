@@ -228,18 +228,20 @@ class ContactEditorViewModelTest {
 
     @Test fun discardThenReopenShowsTheSourcesData() = runTest {
         val c = seeded()
+        val dev = com.ilukezippo.vcfdesk.data.SourceId.Device
         val h = holder()
-        val e1 = h.open(c.id.let { com.ilukezippo.vcfdesk.data.SourceId.Device }, c.id)
+        val e1 = h.open(dev, c.id)
         e1.edit { it.copy(notes = "unsaved") }
         assertTrue(h.isDirty)
-        var left = false
-        h.requestSwitch { left = true }
-        assertFalse(left)
-        assertTrue(h.pendingSwitch.value != null)
-        h.confirmDiscard()
-        assertTrue(left)
+        val target = EditorHolder.PendingTarget.OpenContact("7")
+        assertFalse(h.requestSwitch(target))
+        assertEquals(target, h.pendingSwitch.value)
+        // the pending target is data only: it is still there for whoever shows the dialog next
+        assertEquals(target, h.pendingSwitch.value)
+        assertEquals(target, h.confirmDiscard())
         assertNull(h.current.value)
-        val e2 = h.open(com.ilukezippo.vcfdesk.data.SourceId.Device, c.id)
+        assertNull(h.pendingSwitch.value)
+        val e2 = h.open(dev, c.id)
         assertEquals("", e2.contact.value!!.notes)
         assertFalse(e2.isDirty.value)
     }
@@ -249,17 +251,15 @@ class ContactEditorViewModelTest {
         val dev = com.ilukezippo.vcfdesk.data.SourceId.Device
         val h = holder()
         val e = h.open(dev, a.id)
-        var kept = false; var moved = false
         e.edit { it.copy(notes = "x") }
-        h.requestSwitch(onKeep = { kept = true }) { moved = true }
-        h.keepEditing()
-        assertTrue(kept); assertFalse(moved)
+        val sel = EditorHolder.PendingTarget.Selection
+        assertFalse(h.requestSwitch(sel))
+        assertEquals(sel, h.keepEditing())
         assertNull(h.pendingSwitch.value)
         assertSame(e, h.open(dev, a.id))
         assertEquals("x", e.contact.value!!.notes)
         e.undo()
-        h.requestSwitch { moved = true }
-        assertTrue(moved)
+        assertTrue(h.requestSwitch(EditorHolder.PendingTarget.Leave))
         assertNull(h.current.value)
         assertEquals(b.id, h.open(dev, b.id).contact.value!!.id)
     }

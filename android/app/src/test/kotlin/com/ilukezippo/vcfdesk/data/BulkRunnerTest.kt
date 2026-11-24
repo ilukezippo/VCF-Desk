@@ -467,4 +467,61 @@ class BulkRunnerTest {
         assertEquals("Old Co", src.get(c.id)!!.org.company)
         assertEquals("added later", src.get(c.id)!!.notes)
     }
+
+    private suspend fun keptOrRemoved(keeperJson: String, otherJson: String): Pair<String, Int> {
+        val src = FakeSource(SourceId.Google("me@example.com"))
+        val keeper = src.seed(googleDup(1, keeperJson, notes = "richer"))
+        val other = src.seed(googleDup(2, otherJson))
+        val runner = BulkRunner(BackupStore(dir()))
+        val pv = runner.preview(src, listOf(keeper.id, other.id), BulkOp.RemoveExactDuplicates).single().changes.single().after
+        runner.run(src, listOf(keeper.id, other.id), BulkOp.RemoveExactDuplicates) { _, _ -> }
+        return pv to src.all().size
+    }
+
+    @Test
+    fun googleDuplicateWithUnparseablePersonIsKept() = runTest {
+        val src = FakeSource(SourceId.Google("me@example.com"))
+        val keeper = src.seed(googleDup(1, "", notes = "richer"))
+        val broken = src.seed(person(1).copy(account = keeper.account, extras = listOf(com.ilukezippo.vcfdesk.core.model.Extra("google", "{not json"))))
+        val runner = BulkRunner(BackupStore(dir()))
+        val pv = runner.preview(src, listOf(keeper.id, broken.id), BulkOp.RemoveExactDuplicates).single()
+        assertEquals("kept — has other Google data the other copy lacks", pv.changes.single().after)
+        runner.run(src, listOf(keeper.id, broken.id), BulkOp.RemoveExactDuplicates) { _, _ -> }
+        assertEquals(2, src.all().size)
+    }
+
+    @Test
+    fun googleDuplicateWithLoneOrganizationDetailIsKept() = runTest {
+        val (pv, left) = keptOrRemoved(
+            ""","organizations":[{"metadata":{"primary":true},"name":"Old Co"}]""",
+            ""","organizations":[{"metadata":{"primary":true},"name":"Old Co","jobDescription":"Night shift"}]""",
+        )
+        assertTrue(pv, pv.startsWith("kept") && pv.contains("other Google data"))
+        assertEquals(2, left)
+    }
+
+    @Test
+    fun starredGoogleDuplicateIsKept() = runTest {
+        val (pv, left) = keptOrRemoved(
+            ""","memberships":[{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/myContacts"}}]""",
+            ""","memberships":[{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/myContacts"}},""" +
+                """{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/starred"}}]""",
+        )
+        assertTrue(pv, pv.startsWith("kept"))
+        assertEquals(2, left)
+    }
+
+    @Test
+    fun identicalGoogleDuplicatesAreRemoved() = runTest {
+        val body = { n: Int ->
+            ""","photos":[{"metadata":{"primary":true},"url":"https://example.com/p$n","default":true}]""" +
+                ""","coverPhotos":[{"url":"https://example.com/c$n"}]""" +
+                ""","organizations":[{"metadata":{"source":{"id":"$n"}},"name":"Old Co","formattedType":"Work"}]""" +
+                ""","addresses":[{"metadata":{"primary":true},"city":"Kuwait","countryCode":"KW","formattedValue":"Kuwait $n"}]""" +
+                ""","memberships":[{"metadata":{"source":{"id":"$n"}},"contactGroupMembership":{"contactGroupResourceName":"contactGroups/myContacts"}}]"""
+        }
+        val (pv, left) = keptOrRemoved(body(1), body(2))
+        assertTrue(pv, pv.startsWith("removed"))
+        assertEquals(1, left)
+    }
 }

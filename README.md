@@ -22,12 +22,17 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/ilukezippo/VCF-Desk/releases/download/v1.0/VCF-Desk-Android-1.0.apk"><img src="assets/download-android-button.svg" width="340" alt="Download VCF Desk for Android"></a>
+</p>
+
+<p align="center">
   <sub>Downloads the latest installer straight away. Prefer no install? Get <a href="https://github.com/ilukezippo/VCF-Desk/releases/download/v1.0/VCF-Desk-Portable-1.0.zip">the portable ZIP</a>.</sub>
 </p>
 
 <p align="center">
   <a href="../../releases/latest">All downloads</a> ·
   <a href="#how-to-use">How to use</a> ·
+  <a href="#android">Android</a> ·
   <a href="CHANGELOG.md">What's new</a> ·
   <a href="#import-and-export">Formats</a> ·
   <a href="#build-from-source">Build</a>
@@ -78,6 +83,33 @@ Fields VCF Desk doesn't show (Android extras, iPhone custom labels, groups, UIDs
     <td align="center">Raw vCard view for any field</td>
   </tr>
 </table>
+
+## Android
+
+VCF Desk also runs on Android phones and foldables (Android 8 and newer). It is the same idea as the Windows app: fix your contacts, change many at once, and never lose a field the app doesn't show.
+
+- **Your phone's contacts or your Google contacts:** pick the source inside the app. Phone contacts never leave the phone
+- **Bulk edit with a safety net:** change a field on many contacts, see a preview first, and every run is backed up so it can be undone
+- **Import and export:** vCard, Excel, CSV and Access in; vCard, Google CSV, Outlook CSV and Excel out
+- **Arabic and photos handled properly,** and a two-pane list and editor on an unfolded Galaxy Z Fold or a tablet
+
+Screenshots are coming soon.
+
+### Install
+
+1. **[Download the APK](https://github.com/ilukezippo/VCF-Desk/releases/download/v1.0/VCF-Desk-Android-1.0.apk)** on your phone.
+2. Open it from your browser's downloads or the Files app. Android asks you to **allow installing apps from this source** (your browser or Files): allow it, go back, and tap *Install*.
+3. Google Play Protect may say the app comes from outside the store. Choose **Install anyway**; the app is signed and open source.
+
+### Google sign-in
+
+Google contacts need a one-time setup that takes about 10 minutes: see [docs/android/GOOGLE_SETUP.md](docs/android/GOOGLE_SETUP.md). Phone contacts need no sign-in.
+
+### Android limits
+
+- Google sign-in works only for test users until the app goes through Google's verification
+- **Org units** (department parts of a company) are not stored in Google contacts
+- Excel files can't hold very large photos; use vCard to keep them
 
 ## Features
 

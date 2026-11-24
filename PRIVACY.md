@@ -8,6 +8,12 @@ VCF Desk works **entirely on your own computer**.
 - Your contacts are read from and written to the files you choose, and nowhere else.
 - The app keeps no settings or logs. The installer remembers only the language you picked for it (in `HKEY_CURRENT_USER\Software\VCF Desk`), and uninstalling removes that.
 
+## Android app
+
+- Contacts on your phone are read and written on the phone only and never leave it.
+- If you choose **Google** as the source, the app talks only to Google's People API, for the account you signed in with, to read and change that account's contacts.
+- No analytics, no telemetry, no crash reports, no ads. Backups made before bulk edits stay in the app's own storage on your phone.
+
 ## Contact
 
 Questions: open an issue at https://github.com/ilukezippo/VCF-Desk/issues

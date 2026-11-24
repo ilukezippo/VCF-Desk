@@ -39,13 +39,16 @@ class ContactListViewModelTest {
     @After fun tearDown() { Dispatchers.resetMain() }
 
     private var filterRuns = 0
-    private fun vm(collator: Comparator<in String> = Collator.getInstance(Locale.ENGLISH)) = ContactListViewModel(
+    private fun vm(
+        collator: Comparator<in String> = Collator.getInstance(Locale.ENGLISH),
+        background: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+    ) = ContactListViewModel(
         sourceFor = { id: SourceId -> (if (id == SourceId.Device) device else google) as ContactSource },
         googleAccounts = googleAccounts,
         saveGoogleAccount = { saved += it; googleAccounts.value = googleAccounts.value + it },
         syncChecker = { synced },
         collator = collator,
-        background = Dispatchers.Unconfined,
+        background = background,
         onFilter = { filterRuns++ },
     )
 
@@ -217,5 +220,30 @@ class ContactListViewModelTest {
         assertTrue(items === vm.state.value.items)
         vm.setQuery("2") // a real filter change does re-run it
         assertTrue(filterRuns > runs)
+    }
+
+    @Test fun switchingToTheSameSourceKeepsSelection() = runTest {
+        val a = device.seed(c("Name 1"))
+        val vm = vm()
+        vm.toggleSelect(a.id)
+        vm.switchSource(SourceId.Device)
+        assertEquals(setOf(a.id), vm.state.value.selected)
+    }
+
+    @Test fun staleToggleAfterSwitchDoesNotLeakIntoNewSource() = runTest {
+        val a = device.seed(c("Name 1"))
+        google.seed(c("Name 9"))
+        val vm = vm(background = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        testScheduler.advanceUntilIdle()
+        vm.switchSource(SourceId.Google("name1@example.com"))
+        // the background work has not run yet: the old source's rows are still on screen
+        assertEquals(SourceId.Device, vm.state.value.source)
+        vm.toggleSelect(a.id)
+        testScheduler.advanceUntilIdle()
+        assertEquals(SourceId.Google("name1@example.com"), vm.state.value.source)
+        assertTrue(vm.state.value.selected.isEmpty())
+        vm.switchSource(SourceId.Device)
+        testScheduler.advanceUntilIdle()
+        assertTrue(vm.state.value.selected.isEmpty())
     }
 }

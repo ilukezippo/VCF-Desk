@@ -101,7 +101,11 @@ class ContactListViewModel(
     )
 
     private val controls = MutableStateFlow(Controls(initialSource))
-    private val selected = MutableStateFlow<Set<String>>(emptySet())
+    /** A selection belongs to the source whose list it was made in; it is ignored for any other source. */
+    private class Selection(val source: SourceId, val ids: Set<String>)
+    private val selected = MutableStateFlow<Selection?>(null)
+
+    private fun idsFor(sel: Selection?, source: SourceId): Set<String> = if (sel != null && sel.source == source) sel.ids else emptySet()
     private val loaded = MutableStateFlow(Loaded(initialSource, emptyList(), loading = true))
     private val _state = MutableStateFlow(ListState(source = initialSource, sources = listOf(SourceId.Device)))
     val state: StateFlow<ListState> = _state
@@ -121,7 +125,14 @@ class ContactListViewModel(
                         sourceFor(c.source).contacts().collect { list ->
                             loaded.value = Loaded(c.source, list, loading = false)
                             val ids = list.mapTo(HashSet()) { it.id }
-                            selected.update { sel -> if (ids.containsAll(sel)) sel else sel.filterTo(HashSet()) { it in ids } }
+                            selected.update { sel ->
+                                when {
+                                    sel == null -> null
+                                    sel.source != c.source -> null
+                                    sel.ids.all { it in ids } -> sel
+                                    else -> Selection(c.source, sel.ids.filterTo(LinkedHashSet()) { it in ids })
+                                }
+                            }
                         }
                     } catch (e: CancellationException) {
                         throw e
@@ -149,7 +160,7 @@ class ContactListViewModel(
             combine(view, selected, sources, alsoOnPhone) { v, sel, src, also ->
                 ListState(
                     source = v.source, sources = src, query = v.query, accountFilter = v.accountFilter,
-                    groupFilter = v.groupFilter, sortAsc = v.sortAsc, items = v.items, selected = sel,
+                    groupFilter = v.groupFilter, sortAsc = v.sortAsc, items = v.items, selected = idsFor(sel, v.source),
                     loading = v.loading, alsoOnPhone = also, accounts = v.accounts, groups = v.groups, error = v.error,
                 )
             }.collect { _state.value = it }
@@ -199,25 +210,34 @@ class ContactListViewModel(
     fun setGroupFilter(g: String?) = controls.update { it.copy(groupFilter = g) }
     fun toggleSort() = controls.update { it.copy(sortAsc = !it.sortAsc) }
 
-    fun toggleSelect(id: String) = selected.update { if (id in it) it - id else it + id }
+    /** The source the user is looking at (the one whose rows are on screen). */
+    private fun viewSource() = _state.value.source
+
+    fun toggleSelect(id: String) {
+        val src = viewSource()
+        selected.update { cur ->
+            val ids = idsFor(cur, src)
+            Selection(src, if (id in ids) ids - id else ids + id)
+        }
+    }
 
     fun selectAll() {
         val l = loaded.value
         if (l.source != controls.value.source) return
-        selected.value = l.contacts.mapTo(LinkedHashSet()) { it.id }
+        selected.value = Selection(l.source, l.contacts.mapTo(LinkedHashSet()) { it.id })
     }
 
     fun selectResults() {
-        selected.value = _state.value.items.mapTo(LinkedHashSet()) { it.id }
+        val st = _state.value
+        selected.value = Selection(st.source, st.items.mapTo(LinkedHashSet()) { it.id })
     }
 
-    fun clearSelection() { selected.value = emptySet() }
+    fun clearSelection() { selected.value = null }
 
     fun switchSource(s: SourceId) {
-        selected.value = emptySet()
-        controls.update {
-            if (it.source == s) it else it.copy(source = s, accountFilter = null, groupFilter = null)
-        }
+        if (controls.value.source == s) return
+        selected.value = null
+        controls.update { it.copy(source = s, accountFilter = null, groupFilter = null) }
     }
 
     /** Remembers the (already authorised) Google account and shows it. */

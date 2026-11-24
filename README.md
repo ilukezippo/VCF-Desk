@@ -90,7 +90,7 @@ VCF Desk also runs on Android phones and foldables (Android 8 and newer). It is 
 
 - **Your phone's contacts or your Google contacts:** pick the source inside the app. Phone contacts never leave the phone
 - **Bulk edit with a safety net:** change a field on many contacts, see a preview first, and every run is backed up so it can be undone
-- **Import and export:** vCard, Excel, CSV and Access in; vCard, Google CSV, Outlook CSV and Excel out
+- **Import and export:** vCard, Excel and CSV in; vCard, Google CSV, Outlook CSV and Excel out
 - **Arabic and photos handled properly,** and a two-pane list and editor on an unfolded Galaxy Z Fold or a tablet
 
 Screenshots are coming soon.

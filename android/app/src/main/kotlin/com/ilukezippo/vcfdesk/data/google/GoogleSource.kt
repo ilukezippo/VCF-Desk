@@ -3,6 +3,7 @@ package com.ilukezippo.vcfdesk.data.google
 import com.ilukezippo.vcfdesk.core.model.AccountTag
 import com.ilukezippo.vcfdesk.core.model.Contact
 import com.ilukezippo.vcfdesk.data.ContactSource
+import com.ilukezippo.vcfdesk.data.PhotoUnavailableException
 import com.ilukezippo.vcfdesk.data.SourceId
 import com.ilukezippo.vcfdesk.data.WriteResult
 import java.io.IOException
@@ -97,8 +98,8 @@ class GoogleSource(private val email: String, private val api: PeopleApi) : Cont
         val bytes = photos[id]?.takeIf { it.first == url }?.second ?: try {
             api.fetchPhoto(fullSize(url)).also { photos[id] = url to it }
         } catch (e: IOException) {
-            // photo null means "not loaded / unchanged", so a failed download never removes a photo
-            return@withLock c
+            // never hand out a contact without the photo it has: a backup or a move would lose it
+            throw PhotoUnavailableException(id, e)
         }
         c.copy(photo = bytes, thumbnail = bytes)
     }

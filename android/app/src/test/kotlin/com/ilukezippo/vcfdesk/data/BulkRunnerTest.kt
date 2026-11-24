@@ -217,9 +217,10 @@ class BulkRunnerTest {
         assertEquals(mapOf(ids[1] to "quota"), r.failed)
         assertEquals("move", r.backup!!.action)
 
-        // undo puts the moved ones back in the source
-        runner.undo(src, r.backup!!)
+        // undo puts the moved ones back in the source and removes the copies
+        runner.undo(src, r.backup!!, target)
         assertEquals(3, src.all().size)
+        assertEquals(0, target.all().size)
     }
 
     @Test
@@ -278,5 +279,145 @@ class BulkRunnerTest {
         val pv = BulkRunner(BackupStore(dir())).preview(src, listOf(a.id), BulkOp.Edit(listOf(BulkChange.SetField(TextField.COMPANY, "New Co"))))
         assertEquals("New Co", pv.single().after.org.company)
         assertTrue(src.log.none { !it.startsWith("load") })
+    }
+
+    // ---- fix round 1 ----
+
+    private val edit = BulkOp.Edit(listOf(BulkChange.SetField(TextField.COMPANY, "New Co")))
+
+    @Test
+    fun undoRestoresExactlyTheOriginal() = runTest {
+        val src = FakeSource()
+        val original = src.seed(
+            Contact(
+                account = phone,
+                name = Name(first = "Name", last = "1"), // empty display name
+                phones = listOf(Typed("Main", "55555551"), Typed("", "99999999", pref = true)),
+                emails = listOf(Typed("", "name1@example.com")),
+                events = listOf(Typed("Birthday", "1990-02-01")),
+                org = Org(company = "Old Co", units = listOf("Unit A")),
+                groups = setOf("Family", "Work"),
+                photo = photo,
+                extras = listOf(com.ilukezippo.vcfdesk.core.model.Extra("device", "vnd.example/item")),
+            ),
+        )
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, listOf(original.id), edit) { _, _ -> }
+        assertEquals("New Co", src.get(original.id)!!.org.company)
+        val u = runner.undo(src, r.backup!!)
+        assertEquals(1, u.changed)
+        assertEquals(emptyMap<String, String>(), u.failed)
+        val now = src.get(original.id)!!
+        assertEquals(original.copy(etag = now.etag), now)
+    }
+
+    @Test
+    fun undoDoesNotWriteContactsWhoseUpdateFailed() = runTest {
+        val src = FakeSource()
+        val ids = (1..3).map { src.seed(person(it)).id }
+        src.failUpdate[ids[1]] = "boom"
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, ids, edit) { _, _ -> }
+        src.failUpdate.clear()
+        val etag1 = src.get(ids[1])!!.etag
+        src.log.clear()
+        runner.undo(src, r.backup!!)
+        assertEquals(listOf("update:${ids[0]},${ids[2]}"), src.log.filter { it.startsWith("update") })
+        assertEquals(etag1, src.get(ids[1])!!.etag)
+    }
+
+    @Test
+    fun fieldChangedSinceEditIsAConflictAndKept() = runTest {
+        val src = FakeSource()
+        val c = src.seed(person(1).copy(notes = "old notes"))
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, listOf(c.id), BulkOp.Edit(listOf(
+            BulkChange.SetField(TextField.COMPANY, "New Co"), BulkChange.SetField(TextField.NOTES, "new notes"),
+        ))) { _, _ -> }
+        // someone changes the company again after the bulk edit
+        val fresh = src.load(c.id)
+        src.update(listOf(fresh.copy(org = fresh.org.copy(company = "Other Co"))))
+        val u = runner.undo(src, r.backup!!)
+        val now = src.get(c.id)!!
+        assertEquals("Other Co", now.org.company)
+        assertEquals("old notes", now.notes)
+        assertTrue(u.failed.getValue(c.id).contains("company"))
+    }
+
+    @Test
+    fun contactsWhosePhotoCantBeReadAreNeverTouched() = runTest {
+        val src = FakeSource()
+        val target = FakeSource()
+        val a = src.seed(person(1, withPhoto = true))
+        val b = src.seed(person(2, withPhoto = true))
+        src.photoFails += b.id
+        val runner = BulkRunner(BackupStore(dir()))
+
+        val moved = runner.run(src, listOf(a.id, b.id), BulkOp.CopyTo(target, null, move = true)) { _, _ -> }
+        assertTrue(moved.failed.getValue(b.id).contains("photo"))
+        assertEquals(listOf(b.id), src.all().map { it.id })
+        assertEquals(1, target.all().size)
+        assertArrayEquals(photo, target.all().single().photo)
+        assertEquals(1, BackupStore(dir()).load(moved.backup!!).size)
+
+        val del = runner.run(src, listOf(b.id), BulkOp.Delete) { _, _ -> }
+        assertTrue(del.failed.containsKey(b.id))
+        assertNotNull(src.get(b.id))
+
+        val ed = runner.run(src, listOf(b.id), edit) { _, _ -> }
+        assertTrue(ed.failed.containsKey(b.id))
+        assertEquals("Old Co", src.get(b.id)!!.org.company)
+    }
+
+    @Test
+    fun duplicateWithDataTheKeeperLacksIsKept() = runTest {
+        val src = FakeSource()
+        // richest of the group (a photo counts 3, so it needs more fields than withPhoto)
+        val keeper = src.seed(person(1).let {
+            it.copy(
+                notes = "note", org = Org(company = "Old Co", title = "Boss", department = "Ops"),
+                name = it.name.copy(nickname = "N1"), websites = listOf(Typed("", "example.com")),
+            )
+        })
+        val withAddress = src.seed(person(1).copy(addresses = listOf(com.ilukezippo.vcfdesk.core.model.Address(city = "Kuwait"))))
+        val contained = src.seed(person(1))
+        val withPhoto = src.seed(person(1, withPhoto = true))
+        val runner = BulkRunner(BackupStore(dir()))
+        val ids = listOf(keeper.id, withAddress.id, contained.id, withPhoto.id)
+
+        val pv = runner.preview(src, ids, BulkOp.RemoveExactDuplicates).associateBy { it.contact.id }
+        assertTrue(pv.getValue(contained.id).changes.single().after.startsWith("removed"))
+        val kept = pv.getValue(withAddress.id).changes.single().after
+        assertTrue(kept, kept.startsWith("kept") && kept.contains("address"))
+        assertTrue(pv.getValue(withPhoto.id).changes.single().after.contains("photo"))
+
+        val r = runner.run(src, ids, BulkOp.RemoveExactDuplicates) { _, _ -> }
+        assertEquals(1, r.changed)
+        assertEquals(setOf(keeper.id, withAddress.id, withPhoto.id), src.all().map { it.id }.toSet())
+    }
+
+    @Test
+    fun moveUndoRemovesTheCopiesAndRestoresTheOriginals() = runTest {
+        val src = FakeSource()
+        val target = FakeSource(SourceId.Google("me@example.com"))
+        val ids = (1..3).map { src.seed(person(it)).id }
+        target.failCreate[ids[2]] = "quota"
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, ids, BulkOp.CopyTo(target, null, move = true)) { _, _ -> }
+        assertEquals(2, target.all().size)
+        assertEquals(listOf(ids[2]), src.all().map { it.id })
+
+        // without the target, a move can't be undone properly: refuse rather than leave duplicates
+        val refused = try { runner.undo(src, r.backup!!); false } catch (e: IllegalArgumentException) { true }
+        assertTrue(refused)
+
+        val u = runner.undo(src, r.backup!!, target)
+        assertEquals(emptyMap<String, String>(), u.failed)
+        assertEquals(0, target.all().size)
+        assertEquals(setOf("Name 1", "Name 2", "Name 3"), src.all().map { it.name.display }.toSet())
+        // re-created before the copies were removed
+        val created = src.log.indexOfFirst { it.startsWith("create") }
+        val removed = target.log.indexOfFirst { it.startsWith("delete") }
+        assertTrue(created >= 0 && removed >= 0)
     }
 }

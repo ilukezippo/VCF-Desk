@@ -54,4 +54,36 @@ class BackupStoreTest {
         java.io.File(tmp.root, "x.json.tmp").writeText("{}")
         assertEquals(emptyList<Backup>(), store.list())
     }
+
+    @Test
+    fun snapshotIsLosslessAndPhotoComesFromTheVcf() {
+        val store = BackupStore(tmp.root, clock)
+        val photo = ByteArray(3000) { (it % 200).toByte() }
+        val c = Contact(
+            id = "9", account = acct, etag = "e9",
+            name = Name(first = "Name", last = "9"), // empty display
+            phones = listOf(com.ilukezippo.vcfdesk.core.model.Typed("Main", "55555559"), com.ilukezippo.vcfdesk.core.model.Typed("", "66666666", true, mapOf("X-A" to "b"))),
+            emails = listOf(com.ilukezippo.vcfdesk.core.model.Typed("", "n9@example.com")),
+            events = listOf(com.ilukezippo.vcfdesk.core.model.Typed("Birthday", "1990-02-01")),
+            groups = setOf("B", "A"),
+            photo = photo, thumbnail = byteArrayOf(1),
+            extras = listOf(com.ilukezippo.vcfdesk.core.model.Extra("google", "{\"k\":1}")),
+        )
+        val after = c.copy(notes = "edited")
+        val b = store.save(listOf(c), "edit", SourceId.Device, listOf(after))
+        val e = store.entries(b).single()
+        assertEquals(c.copy(thumbnail = null), e.before)
+        assertEquals(after.copy(photo = null, thumbnail = null), e.after)
+        assertEquals(e.beforePhoto, e.afterPhoto)
+
+        val reloaded = after.copy(name = after.name.copy(display = "Name 9"), etag = "e10")
+        store.setAfter(b, mapOf("9" to reloaded))
+        assertEquals("Name 9", store.entries(b).single().after!!.name.display)
+
+        store.recordMove(b, SourceId.Google("me@example.com"), mapOf("9" to "people/c5"))
+        val m = store.move(b)!!
+        assertEquals(SourceId.Google("me@example.com"), m.target)
+        assertEquals(mapOf("9" to "people/c5"), m.copies)
+        assertEquals(1, store.list().size)
+    }
 }

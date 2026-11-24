@@ -16,6 +16,7 @@ import android.provider.ContactsContract.RawContacts
 import com.ilukezippo.vcfdesk.core.model.AccountTag
 import com.ilukezippo.vcfdesk.core.model.Contact
 import com.ilukezippo.vcfdesk.data.ContactSource
+import com.ilukezippo.vcfdesk.data.PhotoUnavailableException
 import com.ilukezippo.vcfdesk.data.SourceId
 import com.ilukezippo.vcfdesk.data.WriteResult
 import java.io.FileNotFoundException
@@ -126,8 +127,13 @@ class DeviceSource(
         val raw = queryRaws("${RawContacts._ID}=?", arrayOf(id)).firstOrNull { it.id == rawId && !it.deleted }
             ?: throw NoSuchElementException("no device contact $id")
         val titles = queryGroups().associate { it.id to it.title }
-        val c = contactOf(raw, queryData(listOf(rawId))[rawId].orEmpty(), titles)
-        c.copy(photo = readDisplayPhoto(rawId) ?: c.thumbnail)
+        val rows = queryData(listOf(rawId))[rawId].orEmpty()
+        val c = contactOf(raw, rows, titles)
+        val display = readDisplayPhoto(rawId)
+        // PHOTO_FILE_ID set: a full-size photo exists, and the thumbnail is no substitute for it
+        val hasDisplayPhoto = rows.any { it.mimetype == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE && it.values["data14"] != null }
+        if (display == null && hasDisplayPhoto) throw PhotoUnavailableException(id)
+        c.copy(photo = display ?: c.thumbnail)
     }
 
     override suspend fun groups(): List<String> = withContext(io) {

@@ -120,6 +120,24 @@ class DeviceSourceTest {
     }
 
     @Test
+    fun unreadableDisplayPhotoMakesLoadThrow() = runTest {
+        val id = person(1)
+        // PHOTO_FILE_ID set, but the display photo can't be opened
+        fake.addRow(id, Photo.CONTENT_ITEM_TYPE, "data15" to byteArrayOf(1, 2), "data14" to "77")
+        val src = source(this)
+        val thrown = try { src.load(id.toString()); null } catch (e: com.ilukezippo.vcfdesk.data.PhotoUnavailableException) { e }
+        assertTrue(thrown != null)
+    }
+
+    @Test
+    fun thumbnailOnlyPhotoLoadsWithoutDisplayPhoto() = runTest {
+        val id = person(1)
+        fake.addRow(id, Photo.CONTENT_ITEM_TYPE, "data15" to byteArrayOf(1, 2))
+        val src = source(this)
+        assertArrayEquals(byteArrayOf(1, 2), src.load(id.toString()).photo)
+    }
+
+    @Test
     fun contactsExcludesDeletedAndRequeriesOnChange() = runTest {
         person(1)
         person(2, deleted = true)

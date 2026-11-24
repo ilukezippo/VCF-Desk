@@ -180,6 +180,17 @@ class GoogleSourceTest {
     }
 
     @Test
+    fun failedPhotoFetchMakesLoadThrow() = runTest {
+        routes["GET /v1/people/me/connections"] = {
+            json("""{"connections":[${personJson(1, extra = ""","photos":[{"url":"${server.url("/img/p1.jpg")}"}]""")}]}""")
+        }
+        routes["GET /img/p1.jpg=s0"] = { MockResponse.Builder().code(500).build() }
+        source.refresh()
+        val thrown = try { source.load("people/c1"); null } catch (e: com.ilukezippo.vcfdesk.data.PhotoUnavailableException) { e }
+        assertTrue(thrown != null)
+    }
+
+    @Test
     fun loadedPhotoPassedBackUnchangedIsNotReuploaded() = runTest {
         val photoBytes = byteArrayOf(1, 2, 3, 4)
         routes["GET /v1/people/me/connections"] = {

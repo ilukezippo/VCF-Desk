@@ -41,7 +41,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.ilukezippo.vcfdesk.data.google.GoogleAuth
 import com.ilukezippo.vcfdesk.ui.AppActions
+import com.ilukezippo.vcfdesk.data.ContactSource
 import com.ilukezippo.vcfdesk.ui.AppScaffold
+import com.ilukezippo.vcfdesk.ui.DefaultDetail
+import com.ilukezippo.vcfdesk.ui.DetailContent
+import com.ilukezippo.vcfdesk.ui.editor.AndroidPhotoScaler
+import com.ilukezippo.vcfdesk.ui.editor.ContactEditorScreen
+import com.ilukezippo.vcfdesk.ui.editor.ContactEditorViewModel
 import com.ilukezippo.vcfdesk.ui.list.ContactListViewModel
 import com.ilukezippo.vcfdesk.ui.list.SystemAccountSyncChecker
 import com.ilukezippo.vcfdesk.ui.theme.VcfDeskTheme
@@ -59,10 +65,24 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     PermissionGate {
                         val vm: ContactListViewModel = viewModel(factory = ListViewModelFactory(container, applicationContext))
+                        val actions = remember { AppActions() }
                         AppScaffold(
                             vm = vm,
-                            actions = AppActions(),
+                            actions = actions,
                             pickGoogleAccount = { pickAndAuthorise(auth) },
+                            detail = { content, onClose ->
+                                if (content is DetailContent.Contact) {
+                                    // one editor per (source, contact): edits survive a trip to another contact
+                                    val sourceId = vm.state.value.source
+                                    val editor: ContactEditorViewModel = viewModel(
+                                        key = "editor/$sourceId/${content.id}",
+                                        factory = EditorViewModelFactory(container.source(sourceId), content.id),
+                                    )
+                                    ContactEditorScreen(editor, onClose)
+                                } else {
+                                    DefaultDetail(content, actions)
+                                }
+                            },
                         )
                     }
                 }
@@ -94,6 +114,12 @@ private class ListViewModelFactory(
         saveGoogleAccount = container.settings::addGoogleAccount,
         syncChecker = SystemAccountSyncChecker(context),
     ) as T
+}
+
+private class EditorViewModelFactory(private val source: ContactSource, private val id: String) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        ContactEditorViewModel({ source }, id, AndroidPhotoScaler()) as T
 }
 
 private val PERMISSIONS = arrayOf(

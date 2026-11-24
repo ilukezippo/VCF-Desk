@@ -193,7 +193,7 @@ private fun Section(title: Int, expanded: Boolean, onToggle: () -> Unit, danger:
 }
 
 @Composable
-private fun <T> Picker(label: String, value: String, options: List<T>, text: @Composable (T) -> String, onPick: (T) -> Unit) {
+internal fun <T> Picker(label: String, value: String, options: List<T>, text: @Composable (T) -> String, onPick: (T) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium)

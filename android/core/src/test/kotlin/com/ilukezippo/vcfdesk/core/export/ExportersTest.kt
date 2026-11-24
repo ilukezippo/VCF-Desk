@@ -108,4 +108,12 @@ class ExportersTest {
         val csv = Csv.read(Exporters.export(listOf(c), ExportFormat.CSV))
         assertEquals(40000, csv.rows[0].last().length)
     }
+
+    @Test fun excelPhotosOmittedCountsOnlyOversized() {
+        val big = Contact(name = Name(display = "Name 1"), photo = ByteArray(30000) { 0x41 })
+        val small = Contact(name = Name(display = "Name 2"), photo = ByteArray(1000) { 0x41 })
+        val none = Contact(name = Name(display = "Name 3"))
+        assertEquals(1, Exporters.excelPhotosOmitted(listOf(big, small, none)))
+        assertEquals(0, Exporters.excelPhotosOmitted(listOf(small, none)))
+    }
 }

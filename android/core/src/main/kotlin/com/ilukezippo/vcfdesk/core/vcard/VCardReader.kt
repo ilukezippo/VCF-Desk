@@ -189,6 +189,9 @@ object VCardReader {
     private val URI_SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.\\-]*:")
     private val DATA_URI = Regex("data:image/[\\w.+-]+;base64,(.*)", RegexOption.DOT_MATCHES_ALL)
 
+    /** Decodes like the table reader (BOM, strict UTF-8, else windows-1256), then reads. */
+    fun read(bytes: ByteArray): List<Contact> = read(com.ilukezippo.vcfdesk.core.table.Csv.decode(bytes))
+
     fun read(text: String): List<Contact> {
         val out = ArrayList<Contact>()
         var cur: ArrayList<Prop>? = null

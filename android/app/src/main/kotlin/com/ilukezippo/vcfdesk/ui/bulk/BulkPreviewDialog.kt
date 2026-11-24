@@ -222,7 +222,7 @@ private fun DoneDialog(s: Stage.Done, onUndo: () -> Unit, onClose: () -> Unit) {
 }
 
 @Composable
-private fun Failures(failed: Map<String, String>, names: Map<String, String>) {
+internal fun Failures(failed: Map<String, String>, names: Map<String, String>) {
     if (failed.isEmpty()) return
     Text(pluralStringResource(R.plurals.bulk_failed_header, failed.size, failed.size), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
     LazyColumn(Modifier.heightIn(max = 200.dp)) {

@@ -22,6 +22,10 @@ object Exporters {
     /** Excel refuses cells longer than this, so a bigger photo is left out of the .xlsx (never out of CSV/vCard). */
     private const val EXCEL_CELL_LIMIT = 32767
 
+    /** How many contacts' photos [export] to [ExportFormat.EXCEL] leaves blank because the cell would be too long. */
+    fun excelPhotosOmitted(cs: List<Contact>): Int =
+        cs.count { c -> c.photo?.takeIf { it.isNotEmpty() }?.let { Base64.getEncoder().encodeToString(it).length > EXCEL_CELL_LIMIT } == true }
+
     fun export(cs: List<Contact>, f: ExportFormat): ByteArray = when (f) {
         ExportFormat.ANDROID_VCF, ExportFormat.IPHONE_VCF -> VCardWriter.write(cs, VCardVersion.V30).toByteArray(Charsets.UTF_8)
         ExportFormat.VCARD4 -> VCardWriter.write(cs, VCardVersion.V40).toByteArray(Charsets.UTF_8)

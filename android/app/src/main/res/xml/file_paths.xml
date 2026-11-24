@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- exports made for sharing -->
+    <cache-path name="share" path="share/" />
+    <!-- the vCard of a backup -->
+    <files-path name="backups" path="backups/" />
+</paths>

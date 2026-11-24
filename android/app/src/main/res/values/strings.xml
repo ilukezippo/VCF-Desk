@@ -245,4 +245,165 @@
     <string name="bulk_undone">Undone: %1$d restored</string>
     <string name="bulk_undo_failed">Could not undo: %1$s</string>
     <string name="bulk_error_title">Something went wrong</string>
+
+    <!-- shared by Import, Export, Backups, Settings -->
+    <string name="back">Back</string>
+    <string name="done">Done</string>
+    <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
+    <string name="source_label">Source</string>
+
+    <!-- Import -->
+    <string name="import_title">Import contacts</string>
+    <string name="import_intro">Import a vCard (.vcf), CSV or Excel (.xlsx) file as new contacts. Nothing existing is changed.</string>
+    <string name="import_choose">Choose file…</string>
+    <string name="import_choose_other">Choose another file</string>
+    <string name="import_reading">Reading file…</string>
+    <string name="import_err_too_large">That file is larger than %1$d MB, which is too big to import here.</string>
+    <string name="import_err_no_contacts">No contacts were found in that file.</string>
+    <string name="import_err_old_excel">This is an old Excel (.xls) file. Open it in Excel and save it as .xlsx or CSV, then try again.</string>
+    <string name="import_err_unreadable">That file could not be read%1$s</string>
+    <string name="import_err_write">The import stopped: %1$s. Some contacts may already have been added.</string>
+    <string name="import_kind_vcf">vCard file</string>
+    <string name="import_kind_csv">CSV file</string>
+    <string name="import_kind_xlsx">Excel file</string>
+    <plurals name="import_vcf_found">
+        <item quantity="one">%1$d contact found</item>
+        <item quantity="other">%1$d contacts found</item>
+    </plurals>
+    <string name="import_sheet">Sheet</string>
+    <string name="import_mapping">Columns</string>
+    <string name="import_mapping_hint">Choose what each column holds. Columns set to Skip are ignored.</string>
+    <string name="import_example">e.g. %1$s</string>
+    <string name="import_one_middle">Keep only first middle name</string>
+    <string name="import_country_code">Country code</string>
+    <string name="import_country_code_hint">Added to 8-digit local numbers. Leave empty to add none.</string>
+    <string name="import_country_code_bad">Use + and 1 to 4 digits, like +965</string>
+    <plurals name="import_rows_become">
+        <item quantity="one">%1$d row will become a contact</item>
+        <item quantity="other">%1$d rows will become contacts</item>
+    </plurals>
+    <plurals name="import_contacts_become">
+        <item quantity="one">%1$d contact will be added</item>
+        <item quantity="other">%1$d contacts will be added</item>
+    </plurals>
+    <string name="import_none">No rows would become contacts. Check the column mapping.</string>
+    <string name="import_into">Add to</string>
+    <string name="import_button">Import</string>
+    <string name="import_running">Importing… %1$d of %2$d</string>
+    <string name="import_done_title">Import finished</string>
+    <plurals name="import_written">
+        <item quantity="one">%1$d contact added</item>
+        <item quantity="other">%1$d contacts added</item>
+    </plurals>
+    <string name="import_skipped">%1$d skipped (read-only account)</string>
+    <plurals name="import_failed_header">
+        <item quantity="one">%1$d contact could not be added</item>
+        <item quantity="other">%1$d contacts could not be added</item>
+    </plurals>
+    <string name="import_another">Import another file</string>
+
+    <string name="col_skip">Skip</string>
+    <string name="col_full_name">Full name</string>
+    <string name="col_prefix">Prefix</string>
+    <string name="col_first">First name</string>
+    <string name="col_middle">Middle name</string>
+    <string name="col_last">Last name</string>
+    <string name="col_suffix">Suffix</string>
+    <string name="col_nickname">Nickname</string>
+    <string name="col_mobile">Mobile phone</string>
+    <string name="col_phone_home">Home phone</string>
+    <string name="col_phone_work">Work phone</string>
+    <string name="col_phone_other">Other phone</string>
+    <string name="col_email">Email</string>
+    <string name="col_email_work">Work email</string>
+    <string name="col_company">Company</string>
+    <string name="col_department">Department</string>
+    <string name="col_title">Job title</string>
+    <string name="col_street">Street</string>
+    <string name="col_city">City</string>
+    <string name="col_region">Region / state</string>
+    <string name="col_postcode">Postcode</string>
+    <string name="col_country">Country</string>
+    <string name="col_birthday">Birthday</string>
+    <string name="col_notes">Notes</string>
+    <string name="col_groups">Groups</string>
+    <string name="col_website">Website</string>
+    <string name="col_photo">Photo (base64)</string>
+
+    <!-- Export -->
+    <string name="export_title">Export contacts</string>
+    <string name="export_scope">Which contacts</string>
+    <string name="export_scope_all">All contacts in this source</string>
+    <string name="export_scope_results">Current search results</string>
+    <string name="export_scope_selection">Selected contacts</string>
+    <string name="export_scope_count">%1$d contacts</string>
+    <string name="export_format">Format</string>
+    <string name="export_fmt_android_vcf">vCard 3.0 (.vcf) for Android</string>
+    <string name="export_fmt_iphone_vcf">vCard 3.0 (.vcf) for iPhone</string>
+    <string name="export_fmt_vcard4">vCard 4.0 (.vcf)</string>
+    <string name="export_fmt_google_csv">Google Contacts CSV</string>
+    <string name="export_fmt_outlook_csv">Outlook CSV</string>
+    <string name="export_fmt_excel">Excel (.xlsx)</string>
+    <string name="export_fmt_csv">Plain CSV</string>
+    <string name="export_fmt_split_zip">One .vcf per contact (.zip)</string>
+    <string name="export_save">Save to file…</string>
+    <string name="export_share">Share</string>
+    <string name="export_working">Reading contacts… %1$d of %2$d</string>
+    <string name="export_failed">Export failed: %1$s</string>
+    <string name="export_done_title">Export finished</string>
+    <plurals name="export_exported">
+        <item quantity="one">%1$d contact exported</item>
+        <item quantity="other">%1$d contacts exported</item>
+    </plurals>
+    <string name="export_nothing">Nothing was exported.</string>
+    <plurals name="export_skipped_header">
+        <item quantity="one">%1$d contact was left out</item>
+        <item quantity="other">%1$d contacts were left out</item>
+    </plurals>
+    <plurals name="export_excel_photos">
+        <item quantity="one">%1$d photo was too large for Excel and was left out. Use VCF to keep photos.</item>
+        <item quantity="other">%1$d photos were too large for Excel and were left out. Use VCF to keep photos.</item>
+    </plurals>
+    <string name="export_share_title">Share contacts</string>
+
+    <!-- Backups -->
+    <string name="backups_title">Backups</string>
+    <string name="backups_intro">A backup is saved before every bulk edit, delete or move. Restore puts the contacts back as they were.</string>
+    <string name="backups_empty">No backups yet</string>
+    <string name="backups_action_edit">Bulk edit</string>
+    <string name="backups_action_delete">Delete</string>
+    <string name="backups_action_move">Move</string>
+    <string name="backups_action_undo">Undo</string>
+    <plurals name="backups_count">
+        <item quantity="one">%1$d contact</item>
+        <item quantity="other">%1$d contacts</item>
+    </plurals>
+    <string name="backups_restore">Restore</string>
+    <string name="backups_share">Share</string>
+    <string name="backups_restore_title">Restore this backup?</string>
+    <string name="backups_restore_body">Changes made by that %1$s are reverted where the contacts have not been changed since. What is overwritten is backed up first.</string>
+    <string name="backups_restoring">Restoring…</string>
+    <string name="backups_restored_title">Restore finished</string>
+    <string name="backups_account_missing">This backup belongs to %1$s, which is no longer added. Add the account in Settings, then restore.</string>
+    <string name="backups_restore_failed">Could not restore: %1$s</string>
+    <string name="backups_load_failed">Could not read backups: %1$s</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_country_code">Default country code</string>
+    <string name="settings_country_code_hint">Added to 8-digit local numbers by Import and Bulk edit.</string>
+    <string name="settings_country_code_bad">Use + and 1 to 4 digits, like +965</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_saved">Saved</string>
+    <string name="settings_google">Google accounts</string>
+    <string name="settings_google_none">No Google accounts added</string>
+    <string name="settings_google_add">Add Google account…</string>
+    <string name="settings_google_remove">Remove</string>
+    <string name="settings_google_remove_title">Remove %1$s?</string>
+    <string name="settings_google_remove_body">The account is only removed from this app. Its contacts are not deleted.</string>
+    <string name="settings_privacy">Phone contacts never leave your phone. The app only goes online when you use a signed-in Google account.</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">VCF Desk %1$s</string>
+    <string name="settings_github">GitHub: github.com/ilukezippo/VCF-Desk</string>
 </resources>

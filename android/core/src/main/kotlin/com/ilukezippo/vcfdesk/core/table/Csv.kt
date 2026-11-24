@@ -33,7 +33,8 @@ object Csv {
     private fun quote(s: String): String =
         if (s.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + s.replace("\"", "\"\"") + "\"" else s
 
-    private fun decode(b: ByteArray): String {
+    /** BOM (UTF-8, UTF-16 LE/BE), else strict UTF-8, else windows-1256. */
+    fun decode(b: ByteArray): String {
         fun u(i: Int) = b[i].toInt() and 0xFF
         if (b.size >= 3 && u(0) == 0xEF && u(1) == 0xBB && u(2) == 0xBF) return String(b, 3, b.size - 3, Charsets.UTF_8)
         if (b.size >= 2 && u(0) == 0xFF && u(1) == 0xFE) return String(b, 2, b.size - 2, Charsets.UTF_16LE)

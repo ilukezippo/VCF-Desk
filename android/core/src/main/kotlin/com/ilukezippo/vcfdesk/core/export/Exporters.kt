@@ -86,12 +86,19 @@ object Exporters {
         }
 
         override fun close() {
+            var first: Throwable? = null
             try {
                 zip?.finish()
                 out.flush()
-            } finally {
-                out.close()
+            } catch (e: Throwable) {
+                first = e
             }
+            try {
+                out.close()
+            } catch (e: Throwable) {
+                if (first == null) first = e else first.addSuppressed(e)
+            }
+            first?.let { throw it }
         }
     }
 

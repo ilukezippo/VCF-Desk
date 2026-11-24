@@ -309,6 +309,23 @@ class IoViewModelTest {
         assertTrue(deleted.isEmpty())
     }
 
+    @Test fun aWriteThatFailsMidwayKeepsThePartialFile() {
+        val src = FakeSource()
+        val a = src.seed(people(1)[0])
+        val vm = ExportViewModel(
+            { object : java.io.OutputStream() {
+                override fun write(b: Int) { throw java.io.IOException("disk full") }
+                override fun write(p: ByteArray, o: Int, l: Int) { throw java.io.IOException("disk full after some bytes") }
+            } },
+            { deleted += it }, { File(tmp.root, it) }, dispatcher,
+        )
+        deleted.clear()
+        vm.configure(src, listOf(a), emptySet())
+        vm.export(ExportScope.RESULTS, ExportFormat.ANDROID_VCF, uri)
+        assertTrue((vm.state.value as ExportState.Failed).partialFile)
+        assertTrue(deleted.isEmpty())
+    }
+
     @Test fun formatsHaveMimeAndName() {
         assertEquals("contacts.vcf", ExportFormat.ANDROID_VCF.fileName())
         assertEquals("contacts.zip", ExportFormat.SPLIT_VCF_ZIP.fileName())

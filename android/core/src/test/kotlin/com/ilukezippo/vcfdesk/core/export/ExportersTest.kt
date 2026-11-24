@@ -126,4 +126,18 @@ class ExportersTest {
             else assertArrayEquals(f.name, Exporters.export(cs, f), bos.toByteArray())
         }
     }
+
+    @Test fun closeKeepsTheFirstFailureAndClosesTheStream() {
+        var closed = false
+        val bad = object : java.io.OutputStream() {
+            override fun write(b: Int) {}
+            override fun flush() { throw java.io.IOException("flush") }
+            override fun close() { closed = true; throw java.io.IOException("close") }
+        }
+        val w = Exporters.StreamWriter(ExportFormat.ANDROID_VCF, bad)
+        val e = runCatching { w.close() }.exceptionOrNull()!!
+        assertEquals("flush", e.message)
+        assertEquals("close", e.suppressed.single().message)
+        assertTrue(closed)
+    }
 }

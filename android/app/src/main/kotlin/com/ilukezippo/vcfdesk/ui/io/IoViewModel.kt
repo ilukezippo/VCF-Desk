@@ -369,9 +369,12 @@ class ExportViewModel(
                                 val loaded = loadAll(src, chunk, skipped, done, listed.size)
                                 done += chunk.size
                                 if (loaded.isNotEmpty()) {
-                                    val w = writer ?: Exporters.StreamWriter(f, open()).also { writer = it }
-                                    w.add(loaded)
+                                    val w = writer ?: open().let { o ->
+                                        try { Exporters.StreamWriter(f, o) } catch (e: Throwable) { runCatching { o.close() }; throw e }
+                                    }.also { writer = it }
+                                    // once the output is open it may no longer be empty
                                     wrote = true
+                                    w.add(loaded)
                                     exported += loaded.size
                                 }
                             }
@@ -389,7 +392,7 @@ class ExportViewModel(
                             if (f == ExportFormat.EXCEL) omitted = Exporters.excelPhotosOmitted(people)
                             if (people.isNotEmpty()) {
                                 val bytes = Exporters.export(people, f)
-                                open().use { it.write(bytes); wrote = true }
+                                open().use { wrote = true; it.write(bytes) }
                             }
                         }
                     } catch (e: OutOfMemoryError) {

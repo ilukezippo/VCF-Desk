@@ -3,4 +3,49 @@
     <string name="app_name">VCF Desk</string>
     <string name="app_subtitle">Contacts Manager</string>
     <string name="app_title_full">VCF Desk – Contacts Manager</string>
+
+    <string name="source_device">On this phone</string>
+    <string name="source_add_google">Add Google account…</string>
+    <string name="source_switcher">Contact source</string>
+    <string name="google_sign_in_failed">Could not add the Google account: %1$s</string>
+    <string name="google_sign_in_unavailable">Google sign-in is not available</string>
+    <string name="banner_also_on_phone">This account is also on your phone; changes show up in both.</string>
+
+    <string name="menu_more">More</string>
+    <string name="menu_import">Import</string>
+    <string name="menu_export">Export</string>
+    <string name="menu_backups">Backups</string>
+    <string name="menu_settings">Settings</string>
+
+    <string name="search_hint">Search contacts</string>
+    <string name="search_clear">Clear search</string>
+    <string name="sort_toggle">Sort order</string>
+    <string name="sort_az">Sorted A to Z</string>
+    <string name="sort_za">Sorted Z to A</string>
+    <string name="filter_all_accounts">All accounts</string>
+    <string name="filter_all_groups">All groups</string>
+    <string name="filter_account">Account</string>
+    <string name="filter_group">Group</string>
+    <string name="contact_count">%1$d contacts</string>
+    <string name="contact_count_filtered">%1$d of %2$d contacts</string>
+    <string name="list_empty">No contacts here</string>
+    <string name="list_no_match">No contacts match</string>
+    <string name="list_error">Could not read contacts: %1$s</string>
+
+    <string name="selected_count">%1$d selected</string>
+    <string name="select_clear">Clear selection</string>
+    <string name="select_results">Select results</string>
+    <string name="select_all">Select all</string>
+    <string name="select_edit">Edit %1$d contacts</string>
+    <string name="select_edit_short">Edit</string>
+    <string name="detail_placeholder">Select a contact</string>
+    <string name="detail_back">Back</string>
+    <string name="account_unknown">Unknown</string>
+    <string name="no_phone">No phone number</string>
+    <string name="no_name">(No name)</string>
+
+    <string name="perm_title">Contacts permission needed</string>
+    <string name="perm_body">VCF Desk reads and edits the contacts stored on this phone. Everything stays on your device; nothing is sent anywhere unless you add a Google account.</string>
+    <string name="perm_retry">Try again</string>
+    <string name="perm_open_settings">Open app settings</string>
 </resources>

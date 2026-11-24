@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -36,18 +37,20 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.ilukezippo.vcfdesk.data.google.GoogleAuth
 import com.ilukezippo.vcfdesk.ui.AppActions
-import com.ilukezippo.vcfdesk.data.ContactSource
 import com.ilukezippo.vcfdesk.ui.AppScaffold
 import com.ilukezippo.vcfdesk.ui.DefaultDetail
 import com.ilukezippo.vcfdesk.ui.DetailContent
 import com.ilukezippo.vcfdesk.ui.editor.AndroidPhotoScaler
 import com.ilukezippo.vcfdesk.ui.editor.ContactEditorScreen
 import com.ilukezippo.vcfdesk.ui.editor.ContactEditorViewModel
+import com.ilukezippo.vcfdesk.ui.editor.EditorHolder
+import com.ilukezippo.vcfdesk.ui.editor.EditorHolderViewModel
 import com.ilukezippo.vcfdesk.ui.list.ContactListViewModel
 import com.ilukezippo.vcfdesk.ui.list.SystemAccountSyncChecker
 import com.ilukezippo.vcfdesk.ui.theme.VcfDeskTheme
@@ -66,24 +69,44 @@ class MainActivity : ComponentActivity() {
                     PermissionGate {
                         val vm: ContactListViewModel = viewModel(factory = ListViewModelFactory(container, applicationContext))
                         val actions = remember { AppActions() }
+                        val holderVm: EditorHolderViewModel = viewModel(factory = EditorHolderFactory(container))
+                        val holder = holderVm.holder
+                        val pending by holder.pendingSwitch.collectAsStateWithLifecycle()
                         AppScaffold(
                             vm = vm,
                             actions = actions,
                             pickGoogleAccount = { pickAndAuthorise(auth) },
+                            beforeOpen = { id, proceed ->
+                                val cur = holder.current.value
+                                if (cur != null && cur.id == id && cur.source == vm.state.value.source) proceed()
+                                else holder.requestSwitch(proceed = proceed)
+                            },
                             detail = { content, onClose ->
                                 if (content is DetailContent.Contact) {
-                                    // one editor per (source, contact): edits survive a trip to another contact
-                                    val sourceId = vm.state.value.source
-                                    val editor: ContactEditorViewModel = viewModel(
-                                        key = "editor/$sourceId/${content.id}",
-                                        factory = EditorViewModelFactory(container.source(sourceId), content.id),
-                                    )
-                                    ContactEditorScreen(editor, onClose)
+                                    val editor = holder.open(vm.state.value.source, content.id)
+                                    ContactEditorScreen(editor) { holder.close(); onClose() }
                                 } else {
+                                    // the contact was left some other way (selection, source change): drop a clean editor, ask about a dirty one
+                                    LaunchedEffect(content) {
+                                        val open = holder.current.value
+                                        if (open != null) holder.requestSwitch(onKeep = {
+                                            if (content is DetailContent.Selection) vm.clearSelection()
+                                            else if (vm.state.value.source != open.source) vm.switchSource(open.source)
+                                        }) {}
+                                    }
                                     DefaultDetail(content, actions)
                                 }
                             },
                         )
+                        if (pending != null) {
+                            AlertDialog(
+                                onDismissRequest = holder::keepEditing,
+                                title = { Text(stringResource(R.string.editor_discard_title)) },
+                                text = { Text(stringResource(R.string.editor_discard_body)) },
+                                confirmButton = { TextButton(onClick = holder::confirmDiscard) { Text(stringResource(R.string.editor_discard)) } },
+                                dismissButton = { TextButton(onClick = holder::keepEditing) { Text(stringResource(R.string.editor_keep_editing)) } },
+                            )
+                        }
                     }
                 }
             }
@@ -116,10 +139,11 @@ private class ListViewModelFactory(
     ) as T
 }
 
-private class EditorViewModelFactory(private val source: ContactSource, private val id: String) : ViewModelProvider.Factory {
+private class EditorHolderFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        ContactEditorViewModel({ source }, id, AndroidPhotoScaler()) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = EditorHolderViewModel(
+        EditorHolder { source, id -> ContactEditorViewModel({ container.source(source) }, id, AndroidPhotoScaler()) },
+    ) as T
 }
 
 private val PERMISSIONS = arrayOf(

@@ -64,6 +64,8 @@ fun AppScaffold(
     actions: AppActions,
     /** Runs the Google account chooser + consent; returns the email, or null if the user backed out. Throws on failure. */
     pickGoogleAccount: suspend () -> String?,
+    /** Called before another contact is opened; run `proceed` to open it (the editor may ask to discard edits first). */
+    beforeOpen: (id: String, proceed: () -> Unit) -> Unit = { _, proceed -> proceed() },
     detail: @Composable (DetailContent, onClose: () -> Unit) -> Unit = { content, _ -> DefaultDetail(content, actions) },
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -111,7 +113,7 @@ fun AppScaffold(
                         vm = vm,
                         actions = actions,
                         openId = openId,
-                        onOpen = { id -> scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, id) } },
+                        onOpen = { id -> beforeOpen(id) { scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, id) } } },
                         onEditSelected = {
                             actions.onEditSelected(state.selected)
                             scope.launch { navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, BULK) }

@@ -9,6 +9,7 @@ import com.ilukezippo.vcfdesk.data.PhotoUnavailableException
 import com.ilukezippo.vcfdesk.data.WriteResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -159,12 +160,18 @@ class ContactEditorViewModel(
         viewModelScope.launch {
             val scaled = try {
                 withContext(scaleDispatcher) { photoScaler.scale(bytes) }
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { null } catch (e: OutOfMemoryError) { null }
             if (scaled == null) { _photoError.value = true; return@launch }
             _photoError.value = false
             edit { it.copy(photo = scaled, thumbnail = scaled) }
         }
     }
+
+    /** The picked image could not be read at all. */
+    fun reportPhotoError() { _photoError.value = true }
+
+    /** Stops this editor's work; call when the editor is closed. */
+    fun dispose() { viewModelScope.coroutineContext.cancel() }
 
     fun clearPhotoError() { _photoError.value = false }
 

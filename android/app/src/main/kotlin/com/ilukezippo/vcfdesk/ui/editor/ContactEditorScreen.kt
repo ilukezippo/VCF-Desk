@@ -211,7 +211,7 @@ private fun EditorBody(c: Contact, vm: ContactEditorViewModel, readOnly: Boolean
         if (readOnly) Banner(stringResource(R.string.editor_read_only))
         if (saveError != null) Banner(stringResource(R.string.editor_stale, saveError), stringResource(R.string.editor_reload), vm::reload)
 
-        PhotoSection(c, enabled, onPicked = vm::setPhoto)
+        PhotoSection(c, enabled, onPicked = { b -> if (b == null) vm.reportPhotoError() else vm.setPhoto(b) })
 
         Section(stringResource(R.string.editor_section_name)) {
             fun name(key: String, f: (Name) -> Name) = vm.edit(key) { it.copy(name = f(it.name)) }
@@ -291,16 +291,24 @@ private fun Field(
 }
 
 @Composable
-private fun PhotoSection(c: Contact, enabled: Boolean, onPicked: (ByteArray) -> Unit) {
+private fun PhotoSection(c: Contact, enabled: Boolean, onPicked: (ByteArray?) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var viewing by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null) scope.launch {
             val bytes = withContext(Dispatchers.IO) {
-                try { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } catch (e: java.io.IOException) { null }
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                } catch (e: OutOfMemoryError) {
+                    null
+                }
             }
-            if (bytes != null) onPicked(bytes)
+            onPicked(bytes)
         }
     }
     val bitmap by produceState<ImageBitmap?>(null, c.photo, c.thumbnail) {

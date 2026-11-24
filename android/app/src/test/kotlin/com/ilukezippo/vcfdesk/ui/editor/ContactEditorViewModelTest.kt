@@ -197,4 +197,70 @@ class ContactEditorViewModelTest {
         assertEquals(1, resized.size)
         assertNull(scaler.scale(byteArrayOf(1, 2, 3)))
     }
+
+    @Test fun sampleSizeKeepsTheLongestSideAtOrAbove720() {
+        assertEquals(8, PhotoScaling.sampleSize(8000, 6000))
+        assertEquals(1, PhotoScaling.sampleSize(1000, 1000))
+        assertEquals(1, PhotoScaling.sampleSize(1439, 100))
+        assertEquals(2, PhotoScaling.sampleSize(1440, 100))
+        assertEquals(1, PhotoScaling.sampleSize(500, 400))
+    }
+
+    @Test fun rotatedPhotosAreRedoneEvenWhenSmall() {
+        val resized = ArrayList<Pair<Int, Int>>()
+        val codec = object : ImageCodec {
+            override fun size(bytes: ByteArray) = 400 to 600
+            override fun rotation(bytes: ByteArray) = 90
+            override fun resize(bytes: ByteArray, width: Int, height: Int): ByteArray { resized += width to height; return byteArrayOf(5) }
+        }
+        assertArrayEquals(byteArrayOf(5), CodecPhotoScaler(codec).scale(byteArrayOf(1)))
+        assertEquals(listOf(400 to 600), resized)
+    }
+
+    @Test fun anImageThatRunsOutOfMemoryBecomesAPhotoErrorNotACrash() = runTest {
+        val vm = vm(seeded().id, object : PhotoScaler { override fun scale(bytes: ByteArray): ByteArray? = throw OutOfMemoryError() })
+        vm.setPhoto(byteArrayOf(1))
+        assertTrue(vm.photoError.value)
+        assertNull(vm.contact.value!!.photo)
+    }
+
+    private fun holder() = EditorHolder { _, id -> ContactEditorViewModel({ source }, id, noScale, Dispatchers.Unconfined) }
+
+    @Test fun discardThenReopenShowsTheSourcesData() = runTest {
+        val c = seeded()
+        val h = holder()
+        val e1 = h.open(c.id.let { com.ilukezippo.vcfdesk.data.SourceId.Device }, c.id)
+        e1.edit { it.copy(notes = "unsaved") }
+        assertTrue(h.isDirty)
+        var left = false
+        h.requestSwitch { left = true }
+        assertFalse(left)
+        assertTrue(h.pendingSwitch.value != null)
+        h.confirmDiscard()
+        assertTrue(left)
+        assertNull(h.current.value)
+        val e2 = h.open(com.ilukezippo.vcfdesk.data.SourceId.Device, c.id)
+        assertEquals("", e2.contact.value!!.notes)
+        assertFalse(e2.isDirty.value)
+    }
+
+    @Test fun keepEditingStaysAndCleanEditorsSwitchAtOnce() = runTest {
+        val a = seeded(); val b = seeded()
+        val dev = com.ilukezippo.vcfdesk.data.SourceId.Device
+        val h = holder()
+        val e = h.open(dev, a.id)
+        var kept = false; var moved = false
+        e.edit { it.copy(notes = "x") }
+        h.requestSwitch(onKeep = { kept = true }) { moved = true }
+        h.keepEditing()
+        assertTrue(kept); assertFalse(moved)
+        assertNull(h.pendingSwitch.value)
+        assertSame(e, h.open(dev, a.id))
+        assertEquals("x", e.contact.value!!.notes)
+        e.undo()
+        h.requestSwitch { moved = true }
+        assertTrue(moved)
+        assertNull(h.current.value)
+        assertEquals(b.id, h.open(dev, b.id).contact.value!!.id)
+    }
 }

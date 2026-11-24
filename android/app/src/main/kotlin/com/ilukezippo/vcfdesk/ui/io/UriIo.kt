@@ -67,3 +67,8 @@ fun Context.startShare(file: File, mime: String, title: String) {
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     startActivity(Intent.createChooser(send, title).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
 }
+
+/** Deletes a document (best effort; the caller ignores failures). */
+suspend fun ContentResolver.deleteDocument(uri: Uri) = withContext(Dispatchers.IO) {
+    android.provider.DocumentsContract.deleteDocument(this@deleteDocument, uri)
+}

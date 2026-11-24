@@ -181,10 +181,12 @@ class IoViewModelTest {
 
     // ---- export
 
+    private val deleted = ArrayList<Uri>()
+
     private fun exportVm(sink: MutableList<Pair<Uri, ByteArray>> = ArrayList()) =
         ExportViewModel(
             { u -> object : ByteArrayOutputStream() { override fun close() { super.close(); sink += u to toByteArray() } } },
-            { File(tmp.root, "share/$it") }, dispatcher,
+            { deleted += it }, { File(tmp.root, "share/$it") }, dispatcher,
         )
 
     private fun seeded(n: Int): Pair<FakeSource, List<Contact>> {
@@ -279,7 +281,32 @@ class IoViewModelTest {
         vm.configure(src, emptyList(), emptySet())
         vm.export(ExportScope.RESULTS, ExportFormat.ANDROID_VCF, uri)
         assertTrue(sink.isEmpty())
+        assertEquals(listOf(uri), deleted)
         assertEquals(0, (vm.state.value as ExportState.Done).report.exported)
+    }
+
+    @Test fun failureBeforeAnyByteDeletesTheDocumentAfterwardsKeepsIt() {
+        val src = FakeSource()
+        val a = src.seed(people(1)[0])
+        // fails opening: nothing written, the empty document goes
+        val vm1 = ExportViewModel({ throw java.io.IOException("disk full") }, { deleted += it }, { File(tmp.root, it) }, dispatcher)
+        vm1.configure(src, listOf(a), emptySet())
+        vm1.export(ExportScope.RESULTS, ExportFormat.ANDROID_VCF, uri)
+        val f1 = vm1.state.value as ExportState.Failed
+        assertFalse(f1.partialFile)
+        assertEquals(listOf(uri), deleted)
+        // fails after the first chunk was written: the file is kept and the message says so
+        deleted.clear()
+        val b = (1..60).map { src.seed(people(1)[0]) }
+        var writes = 0
+        val vm2 = ExportViewModel(
+            { object : ByteArrayOutputStream() { override fun write(p: ByteArray, o: Int, l: Int) { if (++writes == 2) throw java.io.IOException("disk full"); super.write(p, o, l) } } },
+            { deleted += it }, { File(tmp.root, it) }, dispatcher,
+        )
+        vm2.configure(src, b, emptySet())
+        vm2.export(ExportScope.RESULTS, ExportFormat.ANDROID_VCF, uri)
+        assertTrue((vm2.state.value as ExportState.Failed).partialFile)
+        assertTrue(deleted.isEmpty())
     }
 
     @Test fun formatsHaveMimeAndName() {

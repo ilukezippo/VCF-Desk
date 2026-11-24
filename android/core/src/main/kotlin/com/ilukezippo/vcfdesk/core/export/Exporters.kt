@@ -86,9 +86,12 @@ object Exporters {
         }
 
         override fun close() {
-            zip?.finish()
-            out.flush()
-            out.close()
+            try {
+                zip?.finish()
+                out.flush()
+            } finally {
+                out.close()
+            }
         }
     }
 

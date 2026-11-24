@@ -56,6 +56,7 @@ import com.ilukezippo.vcfdesk.ui.io.ExportViewModel
 import com.ilukezippo.vcfdesk.ui.io.ImportScreen
 import com.ilukezippo.vcfdesk.ui.io.ImportViewModel
 import com.ilukezippo.vcfdesk.ui.io.readCapped
+import com.ilukezippo.vcfdesk.ui.io.deleteDocument
 import com.ilukezippo.vcfdesk.ui.io.openOutputForWrite
 import com.ilukezippo.vcfdesk.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
@@ -338,6 +339,7 @@ private class ExportFactory(private val context: android.content.Context) : View
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = ExportViewModel(
         openOutput = { uri -> context.contentResolver.openOutputForWrite(uri) },
+        deleteOutput = { uri -> context.contentResolver.deleteDocument(uri) },
         shareFile = { name -> File(File(context.cacheDir, "share"), name) },
     ) as T
 }

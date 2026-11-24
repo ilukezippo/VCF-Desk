@@ -121,7 +121,14 @@ fun ExportScreen(
                         LinearProgressIndicator(progress = { if (s.total == 0) 0f else s.done.toFloat() / s.total }, modifier = Modifier.fillMaxWidth())
                         OutlinedButton(onClick = vm::cancel) { Text(stringResource(R.string.bulk_stop)) }
                     }
-                    is ExportState.Failed -> Text(stringResource(R.string.export_failed, s.message), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 12.dp))
+                    is ExportState.Failed -> Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            s.tooLargeFor?.let { stringResource(R.string.export_too_large, stringResource(formatLabel(it))) }
+                                ?: stringResource(R.string.export_failed, s.message),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        if (s.partialFile) Text(stringResource(R.string.export_partial_file), color = MaterialTheme.colorScheme.error)
+                    }
                     is ExportState.Done -> Report(s.report)
                 }
             }

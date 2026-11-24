@@ -274,7 +274,8 @@ sealed interface ExportState {
     data object Idle : ExportState
     data class Working(val done: Int, val total: Int) : ExportState
     data class Done(val report: ExportReport) : ExportState
-    data class Failed(val message: String) : ExportState
+    /** [partialFile]: bytes were already written to the chosen file, which was left there. [tooLargeFor]: the in-memory format ran out of memory. */
+    data class Failed(val message: String, val partialFile: Boolean = false, val tooLargeFor: ExportFormat? = null) : ExportState
 }
 
 fun ExportFormat.mime(): String = when (this) {
@@ -294,6 +295,8 @@ fun ExportFormat.fileName(): String = "contacts.$ext"
 class ExportViewModel(
     /** Opens the document the user picked for writing. */
     private val openOutput: suspend (Uri) -> OutputStream,
+    /** Removes the empty document the picker created, when nothing was exported (failures are ignored). */
+    private val deleteOutput: suspend (Uri) -> Unit = {},
     /** Where a file to share is made (the app's cache). */
     private val shareFile: (name: String) -> File,
     private val background: CoroutineDispatcher = Dispatchers.Default,
@@ -346,6 +349,7 @@ class ExportViewModel(
         if (_state.value is ExportState.Working) return
         _state.value = ExportState.Working(0, 0)
         job = viewModelScope.launch {
+            var wrote = false
             try {
                 val listed = withContext(background) { listContacts(src, scope) }
                 val skipped = ArrayList<Pair<String, String>>()
@@ -367,6 +371,7 @@ class ExportViewModel(
                                 if (loaded.isNotEmpty()) {
                                     val w = writer ?: Exporters.StreamWriter(f, open()).also { writer = it }
                                     w.add(loaded)
+                                    wrote = true
                                     exported += loaded.size
                                 }
                             }
@@ -384,23 +389,33 @@ class ExportViewModel(
                             if (f == ExportFormat.EXCEL) omitted = Exporters.excelPhotosOmitted(people)
                             if (people.isNotEmpty()) {
                                 val bytes = Exporters.export(people, f)
-                                open().use { it.write(bytes) }
+                                open().use { it.write(bytes); wrote = true }
                             }
                         }
                     } catch (e: OutOfMemoryError) {
-                        _state.value = ExportState.Failed("Too many photos to export to ${f.name} at once. Export to VCF instead, or export fewer contacts.")
+                        discard(dest, wrote)
+                        _state.value = ExportState.Failed("out of memory", partialFile = dest != null && wrote, tooLargeFor = f)
                         return@launch
                     }
                 }
+                if (dest != null && exported == 0) discard(dest, false)
                 if (file != null && exported > 0) _share.value = ShareFile(file, f.mime())
                 _state.value = ExportState.Done(ExportReport(exported, skipped, omitted, if (exported > 0) f.fileName() else null))
             } catch (e: CancellationException) {
-                _state.value = ExportState.Idle
+                discard(dest, wrote)
+                _state.value = if (dest != null && wrote) ExportState.Failed("cancelled", partialFile = true) else ExportState.Idle
                 throw e
             } catch (e: Exception) {
-                _state.value = ExportState.Failed(e.message ?: e.javaClass.simpleName)
+                discard(dest, wrote)
+                _state.value = ExportState.Failed(e.message ?: e.javaClass.simpleName, partialFile = dest != null && wrote)
             }
         }
+    }
+
+    /** Deletes the empty document the picker made, unless bytes were already written to it. */
+    private suspend fun discard(dest: Uri?, wrote: Boolean) {
+        if (dest == null || wrote) return
+        withContext(kotlinx.coroutines.NonCancellable) { try { deleteOutput(dest) } catch (e: Exception) {} }
     }
 
     private suspend fun listContacts(src: ContactSource, scope: ExportScope): List<Contact> {

@@ -84,6 +84,8 @@ class BackupsViewModel(
                 throw e
             } catch (e: Exception) {
                 _restore.value = RestoreState.Failed(b, RestoreError.Failed(e.message ?: e.javaClass.simpleName))
+            } catch (e: OutOfMemoryError) {
+                _restore.value = RestoreState.Failed(b, RestoreError.Failed(BulkRunner.TOO_MANY_PHOTOS))
             }
         }
     }

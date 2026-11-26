@@ -104,6 +104,8 @@ class BulkViewModel(
                 throw e
             } catch (e: Exception) {
                 _stage.value = Stage.Error(e.message ?: e.javaClass.simpleName)
+            } catch (e: OutOfMemoryError) {
+                _stage.value = Stage.Error(BulkRunner.TOO_MANY_PHOTOS)
             } finally {
                 _busy.value = false
             }
@@ -139,6 +141,8 @@ class BulkViewModel(
                 throw e
             } catch (e: Exception) {
                 _stage.value = Stage.Error(e.message ?: e.javaClass.simpleName)
+            } catch (e: OutOfMemoryError) {
+                _stage.value = Stage.Error(BulkRunner.TOO_MANY_PHOTOS)
             }
         }
     }
@@ -174,6 +178,8 @@ class BulkViewModel(
                 throw e
             } catch (e: Exception) {
                 err(e.message ?: e.javaClass.simpleName)
+            } catch (e: OutOfMemoryError) {
+                err(BulkRunner.TOO_MANY_PHOTOS)
             }
         }
     }

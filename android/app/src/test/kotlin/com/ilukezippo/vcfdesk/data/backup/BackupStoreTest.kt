@@ -86,4 +86,46 @@ class BackupStoreTest {
         assertEquals(mapOf("9" to "people/c5"), m.copies)
         assertEquals(1, store.list().size)
     }
+
+    @Test
+    fun streamedBackupIsTheSameAsTheWholeFileAndReadsBackCardByCard() {
+        val store = BackupStore(tmp.root, clock)
+        val cs = (1..25).map { i ->
+            Contact(
+                id = "$i", name = Name(first = "Name", last = "$i", display = "Name $i"),
+                phones = listOf(com.ilukezippo.vcfdesk.core.model.Typed("Mobile", "5555555$i")),
+                notes = "line one\nEND:VCARD\nline three", // never ends a card early
+                photo = if (i % 3 == 0) ByteArray(4000 + i) { (it * i % 251).toByte() } else null,
+            )
+        }
+        val b = store.save(cs, "delete", SourceId.Device)
+        // byte-for-byte what writing everything at once gives
+        assertEquals(
+            com.ilukezippo.vcfdesk.core.vcard.VCardWriter.write(cs, com.ilukezippo.vcfdesk.core.vcard.VCardVersion.V30),
+            b.file.readText(Charsets.UTF_8),
+        )
+        // the card-by-card reader sees exactly what the whole-file reader sees
+        val whole = com.ilukezippo.vcfdesk.core.vcard.VCardReader.read(b.file.readText(Charsets.UTF_8))
+        val streamed = ArrayList<Contact>()
+        assertEquals(25, store.forEachCard(b.file) { i, c -> assertEquals(streamed.size, i); streamed += c })
+        assertEquals(whole, streamed)
+        assertEquals(cs.map { it.photo?.toList() }, store.entries(b).map { it.before.photo?.toList() })
+        assertEquals(cs.map { it.notes }, store.load(b).map { it.notes })
+    }
+
+    @Test
+    fun damagedPhotoInTheVcfIsReported() {
+        val store = BackupStore(tmp.root, clock)
+        val c = Contact(id = "1", name = Name(display = "Name 1"), photo = ByteArray(500) { it.toByte() })
+        val b = store.save(listOf(c, c.copy(id = "2", photo = null)), "delete", SourceId.Device)
+        // drop the second card: count no longer matches
+        val text = b.file.readText(Charsets.UTF_8)
+        b.file.writeText(text.substring(0, text.indexOf("END:VCARD") + "END:VCARD\r\n".length))
+        try {
+            store.entries(b)
+            org.junit.Assert.fail("expected damage to be reported")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("damaged"))
+        }
+    }
 }

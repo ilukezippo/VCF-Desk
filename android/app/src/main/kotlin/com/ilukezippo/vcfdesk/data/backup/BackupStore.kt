@@ -73,29 +73,43 @@ class BackupStore(private val dir: File, private val clock: Clock = Clock.system
         val vcfTmp = File(dir, "$base.vcf.tmp")
         val metaTmp = File(dir, "$base.json.tmp")
 
-        val m = Meta(
-            time = now.toString(),
-            action = action,
-            source = encode(source),
-            count = cs.size,
-            vcf = vcf.name,
-            entries = cs.mapIndexed { i, c -> Entry(i, ContactSnapshot.of(c), after?.get(i)?.let(ContactSnapshot::of)) },
-        )
         try {
-            writeSynced(vcfTmp, VCardWriter.write(cs, VCardVersion.V30))
+            // one contact at a time: the whole file (base64 photos) is never one String in memory
+            val entries = ArrayList<Entry>(cs.size)
+            FileOutputStream(vcfTmp).use { out ->
+                val w = out.bufferedWriter(Charsets.UTF_8)
+                cs.forEachIndexed { i, c ->
+                    w.write(VCardWriter.write(listOf(c), VCardVersion.V30))
+                    entries += Entry(i, ContactSnapshot.of(c), after?.get(i)?.let(ContactSnapshot::of))
+                }
+                w.flush()
+                out.fd.sync()
+            }
+            val m = Meta(
+                time = now.toString(),
+                action = action,
+                source = encode(source),
+                count = cs.size,
+                vcf = vcf.name,
+                entries = entries,
+            )
             writeSynced(metaTmp, json.encodeToString(Meta.serializer(), m))
             // the backup must read back as exactly the contacts given, photos included, or it is no backup
-            val back = VCardReader.read(vcfTmp.readText(Charsets.UTF_8))
-            if (back.size != cs.size) throw IOException("backup check failed: wrote ${cs.size}, read back ${back.size}")
-            back.forEachIndexed { i, c ->
-                if (ContactSnapshot.sha(c.photo) != m.entries[i].before.photoSha) throw IOException("backup check failed: photo of contact ${i + 1}")
+            val back = forEachCard(vcfTmp) { i, c ->
+                if (i >= entries.size || ContactSnapshot.sha(c.photo) != entries[i].before.photoSha) {
+                    throw IOException("backup check failed: photo of contact ${i + 1}")
+                }
             }
+            if (back != cs.size) throw IOException("backup check failed: wrote ${cs.size}, read back $back")
             json.decodeFromString(Meta.serializer(), metaTmp.readText(Charsets.UTF_8))
             if (!vcfTmp.renameTo(vcf)) throw IOException("can't write ${vcf.name}")
             if (!metaTmp.renameTo(meta)) { vcf.delete(); throw IOException("can't write ${meta.name}") }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             vcfTmp.delete(); metaTmp.delete()
-            throw if (e is IOException) e else IOException("backup failed: ${e.message}", e)
+            throw when (e) {
+                is IOException, is Error -> e
+                else -> IOException("backup failed: ${e.message}", e)
+            }
         }
         return Backup(vcf, now, action, source, cs.size)
     }
@@ -137,14 +151,43 @@ class BackupStore(private val dir: File, private val clock: Clock = Clock.system
 
     fun entries(b: Backup): List<BackupEntry> {
         val m = readMeta(b)
-        val cards = VCardReader.read(b.file.readText(Charsets.UTF_8))
-        if (cards.size != m.entries.size) throw IOException("backup ${b.file.name} is damaged: ${cards.size} contacts, ${m.entries.size} entries")
-        return m.entries.sortedBy { it.index }.mapIndexed { i, e ->
-            if (e.index != i) throw IOException("backup ${b.file.name} is damaged: no entry $i")
-            val photo = cards[i].photo?.takeIf { it.isNotEmpty() }
+        val sorted = m.entries.sortedBy { it.index }
+        sorted.forEachIndexed { i, e -> if (e.index != i) throw IOException("backup ${b.file.name} is damaged: no entry $i") }
+        val out = ArrayList<BackupEntry>(sorted.size)
+        val n = forEachCard(b.file) { i, card ->
+            val e = sorted.getOrNull(i) ?: throw IOException("backup ${b.file.name} is damaged: more contacts than entries")
+            val photo = card.photo?.takeIf { it.isNotEmpty() }
             if (ContactSnapshot.sha(photo) != e.before.photoSha) throw IOException("backup ${b.file.name} is damaged: photo of entry $i")
-            BackupEntry(e.before.toContact(photo), e.after?.toContact(null), e.before.photoSha, e.after?.photoSha)
+            out += BackupEntry(e.before.toContact(photo), e.after?.toContact(null), e.before.photoSha, e.after?.photoSha)
         }
+        if (n != sorted.size) throw IOException("backup ${b.file.name} is damaged: $n contacts, ${sorted.size} entries")
+        return out
+    }
+
+    /**
+     * Reads [f] one vCard at a time (never the whole file as one String), calling [each] with its
+     * index; returns how many cards there were. Reads exactly what [VCardReader.read] would.
+     */
+    internal fun forEachCard(f: File, each: (Int, Contact) -> Unit): Int {
+        var n = 0
+        val card = StringBuilder()
+        var inCard = false
+        f.bufferedReader(Charsets.UTF_8).useLines { lines ->
+            for (raw in lines) {
+                val line = if (n == 0 && !inCard) raw.removePrefix("\uFEFF") else raw
+                // continuation lines start with whitespace, so BEGIN/END are only ever at the line start
+                val key = line.trimEnd().uppercase()
+                if (key == "BEGIN:VCARD") { inCard = true; card.setLength(0) }
+                if (!inCard) continue
+                card.append(line).append("\r\n")
+                if (key == "END:VCARD") {
+                    inCard = false
+                    for (c in VCardReader.read(card.toString())) each(n++, c)
+                    card.setLength(0)
+                }
+            }
+        }
+        return n
     }
 
     private fun metaFile(b: Backup) = File(b.file.parentFile, b.file.name.removeSuffix(".vcf") + ".json")

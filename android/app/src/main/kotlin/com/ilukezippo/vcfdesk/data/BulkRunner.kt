@@ -323,6 +323,9 @@ class BulkRunner(private val store: BackupStore) {
     ): Backup? =
         try {
             store.save(cs, action, source, after)
+        } catch (e: OutOfMemoryError) {
+            ids.distinct().forEach { t.failed.putIfAbsent(it, "backup could not be written, nothing was changed: $TOO_MANY_PHOTOS") }
+            null
         } catch (e: Exception) {
             val why = "backup could not be written, nothing was changed: ${reason(e)}"
             ids.distinct().forEach { t.failed.putIfAbsent(it, why) }
@@ -410,4 +413,9 @@ class BulkRunner(private val store: BackupStore) {
     }
 
     private fun reason(e: Exception) = e.message ?: e.javaClass.simpleName
+
+    companion object {
+        /** Shown when a bulk change or restore ran out of memory (full photos are held while backing up). */
+        const val TOO_MANY_PHOTOS = "Too many contacts with photos at once — select fewer"
+    }
 }

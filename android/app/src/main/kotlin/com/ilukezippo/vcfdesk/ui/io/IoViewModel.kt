@@ -309,7 +309,25 @@ class ExportViewModel(
     val pendingShare: StateFlow<ShareFile?> = _share.asStateFlow()
 
     private val _allCount = MutableStateFlow<Int?>(null)
+    /** How many contacts "All" exports (read-only copies counted only when included). */
     val allCount: StateFlow<Int?> = _allCount.asStateFlow()
+
+    private val _includeReadOnly = MutableStateFlow(false)
+    /** Whether "All" includes copies from read-only accounts (messaging apps such as WhatsApp); off by default. */
+    val includeReadOnly: StateFlow<Boolean> = _includeReadOnly.asStateFlow()
+
+    /** Contacts in the source, and how many of them are read-only copies; null until counted. */
+    private var counts: Pair<Int, Int>? = null
+
+    private fun publishCount() {
+        _allCount.value = counts?.let { (all, ro) -> if (_includeReadOnly.value) all else all - ro }
+    }
+
+    fun setIncludeReadOnly(on: Boolean) {
+        if (_state.value is ExportState.Working) return
+        _includeReadOnly.value = on
+        publishCount()
+    }
 
     private var source: ContactSource? = null
     private var results: List<Contact> = emptyList()
@@ -327,9 +345,12 @@ class ExportViewModel(
         this.results = results
         this.selected = selected
         // the same source with fresh lists keeps the last report on screen
-        if (newSource) { _state.value = ExportState.Idle; _share.value = null; _allCount.value = null }
+        if (newSource) { _state.value = ExportState.Idle; _share.value = null; counts = null; publishCount() }
         viewModelScope.launch {
-            _allCount.value = try { withContext(background) { source.contacts().first().size } } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            counts = try {
+                withContext(background) { source.contacts().first().let { all -> all.size to all.count { it.account?.readOnly == true } } }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            publishCount()
         }
     }
 
@@ -423,7 +444,8 @@ class ExportViewModel(
 
     private suspend fun listContacts(src: ContactSource, scope: ExportScope): List<Contact> {
         return when (scope) {
-            ExportScope.ALL -> src.contacts().first()
+            // read-only accounts hold copies made by other apps (WhatsApp, Telegram…), not the user's contacts
+            ExportScope.ALL -> src.contacts().first().filter { _includeReadOnly.value || it.account?.readOnly != true }
             ExportScope.RESULTS -> results
             ExportScope.SELECTION -> results.filter { it.id in selected }.let { r ->
                 // a selection may include contacts the search hides

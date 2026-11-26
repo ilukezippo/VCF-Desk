@@ -213,6 +213,26 @@ class IoViewModelTest {
         assertEquals(4, VCardReader.read(sink.single().second).size)
     }
 
+    @Test fun exportAllLeavesOutReadOnlyCopiesUnlessAsked() {
+        val src = FakeSource()
+        val ro = com.ilukezippo.vcfdesk.core.model.AccountTag("com.whatsapp", "WhatsApp", "WhatsApp", readOnly = true)
+        val rw = com.ilukezippo.vcfdesk.core.model.AccountTag("com.google", "me@example.com", "Google", readOnly = false)
+        val cs = people(3).mapIndexed { i, c -> src.seed(c.copy(account = if (i == 1) ro else rw)) }
+        val sink = ArrayList<Pair<Uri, ByteArray>>()
+        val vm = exportVm(sink)
+        vm.configure(src, results = cs, selected = emptySet())
+        assertEquals(false, vm.includeReadOnly.value)
+        assertEquals(2, vm.allCount.value)
+        vm.export(ExportScope.ALL, ExportFormat.ANDROID_VCF, uri)
+        assertEquals(listOf("Name 1", "Name 3"), VCardReader.read(sink.single().second).map { it.name.display })
+
+        sink.clear()
+        vm.setIncludeReadOnly(true)
+        assertEquals(3, vm.allCount.value)
+        vm.export(ExportScope.ALL, ExportFormat.ANDROID_VCF, uri)
+        assertEquals(3, VCardReader.read(sink.single().second).size)
+    }
+
     @Test fun selectionMayIncludeContactsTheSearchHides() {
         val (src, cs) = seeded(3)
         val sink = ArrayList<Pair<Uri, ByteArray>>()

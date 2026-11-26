@@ -335,6 +335,7 @@
     <!-- Export -->
     <string name="export_title">Export contacts</string>
     <string name="export_scope">Which contacts</string>
+    <string name="export_include_read_only">Include copies from messaging apps (read-only)</string>
     <string name="export_scope_all">All contacts in this source</string>
     <string name="export_scope_results">Current search results</string>
     <string name="export_scope_selection">Selected contacts</string>

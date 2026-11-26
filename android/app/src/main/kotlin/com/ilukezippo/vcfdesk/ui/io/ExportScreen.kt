@@ -14,6 +14,8 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +73,7 @@ fun ExportScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val share by vm.pendingShare.collectAsStateWithLifecycle()
     val allCount by vm.allCount.collectAsStateWithLifecycle()
+    val includeReadOnly by vm.includeReadOnly.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val shareTitle = stringResource(R.string.export_share_title)
     LaunchedEffect(share) {
@@ -93,6 +96,16 @@ fun ExportScreen(
             item {
                 Column(Modifier.selectableGroup()) {
                     ScopeRow(ExportScope.ALL, R.string.export_scope_all, allCount, scope, !working) { scope = it }
+                    if (scope == ExportScope.ALL) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 36.dp)
+                                .toggleable(includeReadOnly, enabled = !working, role = Role.Checkbox) { vm.setIncludeReadOnly(it) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(includeReadOnly, onCheckedChange = null, enabled = !working)
+                            Text(stringResource(R.string.export_include_read_only), Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                     ScopeRow(ExportScope.RESULTS, R.string.export_scope_results, results.size, scope, !working && results.isNotEmpty()) { scope = it }
                     ScopeRow(ExportScope.SELECTION, R.string.export_scope_selection, selected.size, scope, !working && selected.isNotEmpty()) { scope = it }
                 }

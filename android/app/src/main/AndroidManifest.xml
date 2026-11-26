@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Lets the app read the names of the apps that keep contacts (WhatsApp, Meet, ...). -->
+    <queries>
+        <intent>
+            <action android:name="android.accounts.AccountAuthenticator" />
+        </intent>
+    </queries>
+
     <application
         android:name=".VcfDeskApp"
         android:allowBackup="false"

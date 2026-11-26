@@ -36,6 +36,7 @@
     <string name="select_clear">Clear selection</string>
     <string name="select_results">Select results</string>
     <string name="select_all">Select all</string>
+    <string name="select_all_shown">Select all shown</string>
     <string name="select_edit">Edit %1$d contacts</string>
     <string name="select_edit_short">Edit</string>
     <string name="detail_placeholder">Select a contact</string>

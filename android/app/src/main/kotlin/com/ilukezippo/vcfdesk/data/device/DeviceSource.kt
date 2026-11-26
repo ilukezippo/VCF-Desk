@@ -61,18 +61,52 @@ class SystemDeviceAccounts(private val context: Context) : DeviceAccounts {
         return adapter != null && !adapter.supportsUploading()
     }
 
-    private fun label(type: String): String = when (type) {
-        "com.google" -> "Google"
-        "com.osp.app.signin" -> "Samsung"
-        else -> runCatching {
-            val d = AccountManager.get(context).authenticatorTypes.first { it.type == type }
-            context.packageManager.getResourcesForApplication(d.packageName).getString(d.labelId)
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: type
-    }
+    private fun label(type: String): String = KNOWN_LABELS[type] ?: runCatching {
+        val d = AccountManager.get(context).authenticatorTypes.first { it.type == type }
+        context.packageManager.getResourcesForApplication(d.packageName).getString(d.labelId)
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: prettyType(type)
 
     companion object {
         /** Phone-local raw contact account types (null/empty is the AOSP local account). */
         val LOCAL_TYPES = setOf("vnd.sec.contact.phone", "com.android.localphone", "com.local.contacts")
+
+        /** Friendly names for common contact account types, used before asking the system. */
+        val KNOWN_LABELS = mapOf(
+            "com.google" to "Google",
+            "com.google.android.apps.tachyon" to "Google Meet",
+            "com.osp.app.signin" to "Samsung",
+            "com.whatsapp" to "WhatsApp",
+            "com.whatsapp.w4b" to "WhatsApp Business",
+            "com.facebook.auth.login" to "Facebook",
+            "com.facebook.messenger" to "Messenger",
+            "org.telegram.messenger" to "Telegram",
+            "org.thoughtcrime.securesms" to "Signal",
+            "com.viber.voip" to "Viber",
+            "com.viber.voip.account" to "Viber",
+            "com.skype.contacts.sync" to "Skype",
+            "com.skype.raider" to "Skype",
+            "com.microsoft.office.outlook.USER_ACCOUNT" to "Outlook",
+            "com.microsoft.teams" to "Teams",
+            "com.linkedin.android" to "LinkedIn",
+            "com.imo.android.imoim" to "imo",
+            "jp.naver.line.android" to "LINE",
+            "com.snapchat.android" to "Snapchat",
+            "com.tencent.mm.account" to "WeChat",
+            "com.android.exchange" to "Exchange",
+            "com.samsung.android.exchange" to "Exchange",
+            "com.google.android.gm.exchange" to "Exchange",
+            "vnd.sec.contact.sim" to "SIM",
+            "vnd.sec.contact.sim2" to "SIM 2",
+            "com.android.sim" to "SIM",
+        )
+
+        /** "org.example.cool_app" -> "Cool app" when nothing better is known. */
+        fun prettyType(type: String): String {
+            val parts = type.split('.').filter { it.isNotBlank() }
+            val skip = setOf("com", "org", "net", "android", "app", "apps", "account", "auth", "login", "sync", "contacts", "vnd")
+            val word = parts.lastOrNull { it.lowercase() !in skip } ?: return type
+            return word.replace('_', ' ').replaceFirstChar { it.uppercase() }
+        }
     }
 }
 

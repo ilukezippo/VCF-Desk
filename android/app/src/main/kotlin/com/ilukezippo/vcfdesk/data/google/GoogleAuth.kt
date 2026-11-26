@@ -79,7 +79,10 @@ class GoogleAuth(private val activity: ComponentActivity) {
     private suspend fun resolve(pending: AuthorizationResult): AuthorizationResult {
         val pi = pending.pendingIntent ?: throw GoogleAuthException("Google needs consent but gave no screen to ask for it")
         val r = launch(ActivityResultContracts.StartIntentSenderForResult(), IntentSenderRequest.Builder(pi.intentSender).build())
-        if (r.resultCode != Activity.RESULT_OK) throw GoogleAuthException("Google access to contacts was not granted")
+        if (r.resultCode != Activity.RESULT_OK) throw GoogleAuthException(
+            "Google sign-in was cancelled or refused. If you didn't cancel it, Google sign-in isn't set up " +
+                "for this app yet: see docs/android/GOOGLE_SETUP.md (package com.ilukezippo.vcfdesk + this build's SHA-1)."
+        )
         return try {
             client.getAuthorizationResultFromIntent(r.data)
         } catch (e: Exception) {

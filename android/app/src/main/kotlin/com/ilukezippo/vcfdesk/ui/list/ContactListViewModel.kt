@@ -316,5 +316,7 @@ internal object Searching {
  */
 fun accountFilterName(a: com.ilukezippo.vcfdesk.core.model.AccountTag): String {
     val name = a.name.trim()
-    return if (name.isEmpty() || name.equals(a.label.trim(), ignoreCase = true)) a.label else "${a.label} · $name"
+    // Only a real user name (an email) tells two accounts apart; app accounts like WhatsApp or the
+    // phone's own "vnd.sec.contact.phone" name just repeat the type, so show the label alone.
+    return if ('@' !in name || name.equals(a.label.trim(), ignoreCase = true)) a.label else "${a.label} · $name"
 }

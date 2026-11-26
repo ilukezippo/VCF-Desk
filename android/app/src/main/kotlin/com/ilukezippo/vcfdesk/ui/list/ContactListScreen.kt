@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -35,6 +36,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -209,6 +211,14 @@ private fun SelectionBar(state: ListState, vm: ContactListViewModel, onEdit: () 
         },
         title = { Text(stringResource(R.string.selected_count, state.selected.size)) },
         actions = {
+            val allShown = state.items.isNotEmpty() && state.items.all { it.id in state.selected }
+            IconButton(onClick = { if (allShown) vm.clearSelection() else vm.selectResults() }) {
+                Icon(
+                    Icons.Filled.SelectAll,
+                    contentDescription = stringResource(if (allShown) R.string.select_clear else R.string.select_all_shown),
+                    tint = if (allShown) Accent else LocalContentColor.current,
+                )
+            }
             TextButton(onClick = onEdit) { Text(stringResource(R.string.select_edit_short)) }
             Box {
                 IconButton(onClick = { menu = true }) {

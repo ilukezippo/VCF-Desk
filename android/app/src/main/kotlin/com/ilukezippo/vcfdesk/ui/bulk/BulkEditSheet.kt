@@ -95,14 +95,52 @@ private fun fieldLabel(f: TextField): Int = when (f) {
 /** A place to copy to: a device account (null: no account) or a Google account. */
 private data class Target(val source: SourceId, val account: AccountTag?)
 
-/** The writable accounts that hold contacts on this phone. */
-fun writableDeviceAccounts(context: Context): List<AccountTag> = try {
-    val types = (ContentResolver.getSyncAdapterTypes() ?: emptyArray())
-        .filter { it.authority == ContactsContract.AUTHORITY }.mapTo(HashSet()) { it.accountType }
+/**
+ * The writable accounts that hold contacts on this phone: the phone itself, Google accounts and
+ * any other account whose contacts sync uploads. Android hides most accounts (Google included)
+ * from other apps' AccountManager calls, so the accounts are also read from the contacts store.
+ * Read-only ones (WhatsApp, Meet...) are left out. Order: phone, Google, the rest.
+ */
+fun writableDeviceAccounts(context: Context): List<AccountTag> {
     val tagger = SystemDeviceAccounts(context)
-    AccountManager.get(context).accounts.filter { it.type in types }.map { tagger.tag(it.type, it.name) }.filter { !it.readOnly }
-} catch (e: SecurityException) {
-    emptyList()
+    val found = LinkedHashMap<Pair<String, String>, AccountTag>()
+    fun add(type: String?, name: String?) {
+        if (type.isNullOrEmpty()) return
+        found.getOrPut(type to name.orEmpty()) { tagger.tag(type, name) }
+    }
+    try {
+        val types = (ContentResolver.getSyncAdapterTypes() ?: emptyArray())
+            .filter { it.authority == ContactsContract.AUTHORITY }.mapTo(HashSet()) { it.accountType }
+        AccountManager.get(context).accounts.filter { it.type in types }.forEach { add(it.type, it.name) }
+    } catch (e: SecurityException) {
+        // fall through to the contacts store
+    }
+    try {
+        context.contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.ACCOUNT_TYPE, ContactsContract.RawContacts.ACCOUNT_NAME),
+            "${ContactsContract.RawContacts.DELETED}=0", null, null,
+        )?.use { c -> while (c.moveToNext()) add(c.getString(0), c.getString(1)) }
+    } catch (e: Exception) {
+        // no permission or no provider: keep what AccountManager gave
+    }
+    fun rank(a: AccountTag) = when {
+        a.type in com.ilukezippo.vcfdesk.data.device.SystemDeviceAccounts.LOCAL_TYPES -> 0
+        a.type == GOOGLE_TYPE -> 1
+        else -> 2
+    }
+    // Chat and call apps keep their own contact lists; copying contacts into them does nothing useful.
+    val appOwned = com.ilukezippo.vcfdesk.data.device.SystemDeviceAccounts.KNOWN_LABELS.keys -
+        setOf(GOOGLE_TYPE, "com.osp.app.signin", "com.android.exchange", "com.samsung.android.exchange",
+            "com.google.android.gm.exchange", "vnd.sec.contact.sim", "vnd.sec.contact.sim2", "com.android.sim")
+    return found.values.filter { !it.readOnly && it.type !in appOwned }.sortedWith(compareBy<AccountTag>({ rank(it) }, { it.name.lowercase() }))
+}
+
+/** [writableDeviceAccounts], read once per screen. */
+@Composable
+fun rememberWritableDeviceAccounts(): List<AccountTag> {
+    val context = LocalContext.current
+    return remember(context) { writableDeviceAccounts(context) }
 }
 
 private fun sameAccount(a: AccountTag?, b: AccountTag?) =
@@ -141,7 +179,7 @@ fun BulkEditSheet(
     /** The accounts of ALL selected contacts (null entry: no account), even those the list filter hides. */
     selectionAccounts: Set<AccountTag?>,
     sourceFor: (SourceId) -> ContactSource,
-    deviceAccounts: List<AccountTag> = writableDeviceAccounts(LocalContext.current),
+    deviceAccounts: List<AccountTag> = rememberWritableDeviceAccounts(),
 ) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val country by vm.country.collectAsStateWithLifecycle()
@@ -328,15 +366,19 @@ private fun CopyMoveForm(
         FilterChip(!move, { move = false }, { Text(stringResource(R.string.bulk_copy)) })
         FilterChip(move, { move = true }, { Text(stringResource(R.string.bulk_move)) })
     }
-    Picker(stringResource(R.string.bulk_target_label), name(targetSource), sources, { name(it) }) {
-        targetSource = it
-        account = if (it == SourceId.Device) deviceAccounts.firstOrNull() else null
+    if (sources.size > 1) {
+        Picker(stringResource(R.string.bulk_target_label), name(targetSource), sources, { name(it) }) {
+            targetSource = it
+            account = if (it == SourceId.Device) deviceAccounts.firstOrNull() else null
+        }
     }
     if (targetSource == SourceId.Device) {
         val none = stringResource(R.string.bulk_account_none)
-        val choices: List<AccountTag?> = deviceAccounts + listOf<AccountTag?>(null)
-        Picker(stringResource(R.string.bulk_account_label), account?.let { "${it.label} · ${it.name}" } ?: none, choices,
-            { a -> a?.let { "${it.label} · ${it.name}" } ?: none }) { account = it }
+        // "No account" is only offered when the phone has no account of its own for local contacts.
+        val hasLocal = deviceAccounts.any { it.type in com.ilukezippo.vcfdesk.data.device.SystemDeviceAccounts.LOCAL_TYPES }
+        val choices: List<AccountTag?> = if (hasLocal) deviceAccounts else deviceAccounts + listOf<AccountTag?>(null)
+        fun label(a: AccountTag?) = a?.let { com.ilukezippo.vcfdesk.ui.list.accountFilterName(it) } ?: none
+        Picker(stringResource(R.string.bulk_account_label), label(account), choices, { label(it) }) { account = it }
     }
     // the exact same place the contacts are already in
     val same = isSameTarget(current, selectionAccounts, targetSource, account)

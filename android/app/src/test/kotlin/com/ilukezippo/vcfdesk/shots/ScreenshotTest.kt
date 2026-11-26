@@ -136,6 +136,11 @@ class ScreenshotTest {
         compose.onAllNodesWithText("Preview").onFirst().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Preview").fetchSemanticsNodes().size >= 2 }
         shot("android-preview")
+        compose.onAllNodesWithText("Cancel").onFirst().performClick()
+        compose.onAllNodesWithText("Copy / move to…").onFirst().performClick()
+        compose.waitForIdle()
+        runCatching { compose.onAllNodesWithText("Phone").onFirst().performClick() }
+        shot("android-copy")
     }
 
     @Config(qualifiers = "w840dp-h900dp-xhdpi")

@@ -242,15 +242,20 @@ private fun SearchRow(state: ListState, vm: ContactListViewModel) {
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // The field keeps its own text and cursor. Reading the text back from the list state
+        // (which updates a moment later) moved the cursor while typing joined scripts like Arabic.
+        var text by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+            mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(state.query))
+        }
         OutlinedTextField(
-            value = state.query,
-            onValueChange = vm::setQuery,
+            value = text,
+            onValueChange = { text = it; if (it.text != state.query) vm.setQuery(it.text) },
             singleLine = true,
             placeholder = { Text(stringResource(R.string.search_hint)) },
             leadingIcon = { Icon(Icons.Filled.Search, null) },
             trailingIcon = {
-                if (state.query.isNotEmpty()) {
-                    IconButton(onClick = { vm.setQuery("") }) {
+                if (text.text.isNotEmpty()) {
+                    IconButton(onClick = { text = androidx.compose.ui.text.input.TextFieldValue(""); vm.setQuery("") }) {
                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.search_clear))
                     }
                 }

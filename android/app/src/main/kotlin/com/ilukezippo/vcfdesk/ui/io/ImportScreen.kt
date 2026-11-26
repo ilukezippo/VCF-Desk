@@ -93,7 +93,7 @@ fun ImportScreen(
     googleSources: List<SourceId.Google>,
     sourceFor: (SourceId) -> ContactSource,
     onBack: () -> Unit,
-    deviceAccounts: List<AccountTag> = writableDeviceAccounts(LocalContext.current),
+    deviceAccounts: List<AccountTag> = com.ilukezippo.vcfdesk.ui.bulk.rememberWritableDeviceAccounts(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val mapping by vm.mapping.collectAsStateWithLifecycle()

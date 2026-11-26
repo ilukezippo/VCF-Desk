@@ -2,8 +2,9 @@ name: Build Android app
 
 on:
   push:
+    branches: ["**"]       # needed: with only tags listed, branch pushes would never build
     paths: ["android/**", ".github/workflows/android.yml"]
-    tags: ["v*"]
+    tags: ["v*"]           # path filters are not applied to tag pushes
   workflow_dispatch:
     inputs:
       tag:

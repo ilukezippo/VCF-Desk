@@ -88,15 +88,7 @@ fun SettingsScreen(
 
             HorizontalDivider()
             Text(stringResource(R.string.settings_google), style = MaterialTheme.typography.titleMedium)
-            if (googleAccounts.isEmpty()) {
-                Text(stringResource(R.string.settings_google_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            googleAccounts.forEach { email ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(email, Modifier.weight(1f))
-                    TextButton(onClick = { removing = email }) { Text(stringResource(R.string.settings_google_remove)) }
-                }
-            }
+            Text(stringResource(R.string.settings_google_info), color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = onAddGoogle) { Text(stringResource(R.string.settings_google_add)) }
 
             HorizontalDivider()

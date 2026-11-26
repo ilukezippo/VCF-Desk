@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
                         AppScaffold(
                             vm = vm,
                             actions = actions,
-                            pickGoogleAccount = { pickAndAuthorise(auth) },
+                            pickGoogleAccount = { openAddGoogleAccount(); null },
                             beforeOpen = { id ->
                                 val cur = holder.current.value
                                 (cur != null && cur.id == id && cur.source == vm.state.value.source) ||
@@ -262,15 +262,7 @@ class MainActivity : ComponentActivity() {
                     onSaveCountryCode = { v -> scope.launch { container.settings.setCountryCode(v) } },
                     onAddGoogle = {
                         scope.launch {
-                            try {
-                                val auth = container.googleAuth
-                                val email = if (auth != null) pickAndAuthorise(auth) else null
-                                if (email != null) vm.addGoogleAccount(email)
-                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                android.widget.Toast.makeText(context, failedText.replace("%s", e.message ?: unavailable), android.widget.Toast.LENGTH_LONG).show()
-                            }
+                            openAddGoogleAccount()
                         }
                     },
                     onRemoveGoogle = { email ->
@@ -288,6 +280,18 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (container.googleAuth != null && isFinishing) container.googleAuth = null
         super.onDestroy()
+    }
+
+    /**
+     * Android's own "add a Google account" screen. Once added (with contacts sync on), the account's
+     * contacts appear in the phone list by themselves and edits sync to Google Contacts.
+     */
+    private fun openAddGoogleAccount() {
+        val add = android.content.Intent(android.provider.Settings.ACTION_ADD_ACCOUNT)
+            .putExtra(android.provider.Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
+        runCatching { startActivity(add) }.onFailure {
+            runCatching { startActivity(android.content.Intent(android.provider.Settings.ACTION_SYNC_SETTINGS)) }
+        }
     }
 
     /** Account chooser, then one token request so the consent screen shows now; null if the user backed out. */

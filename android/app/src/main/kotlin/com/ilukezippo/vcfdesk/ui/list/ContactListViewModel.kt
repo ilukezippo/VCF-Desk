@@ -149,9 +149,9 @@ class ContactListViewModel(
 
         // Source list and the "also on phone" check: only when the source or the account list changes.
         val currentSource = controls.map { it.source }.distinctUntilChanged()
-        val sources = combine(currentSource, googleAccounts) { s, accounts ->
-            (listOf<SourceId>(SourceId.Device) + accounts.map { SourceId.Google(it) } + s).distinct()
-        }
+        // Google contacts are reached through the Google accounts synced on the phone, so the
+        // phone is the only source offered (no separate Google sign-in).
+        val sources = combine(currentSource, googleAccounts) { _, _ -> listOf<SourceId>(SourceId.Device) }
         val alsoOnPhone = combine(currentSource, googleAccounts) { s, _ ->
             (s as? SourceId.Google)?.let { syncChecker.isSyncedOnPhone(it.email) } ?: false
         }.flowOn(background)
@@ -220,6 +220,11 @@ class ContactListViewModel(
             Selection(src, if (id in ids) ids - id else ids + id)
         }
     }
+
+    /** Emails of the Google accounts whose contacts are on the phone (from what's loaded). */
+    fun phoneGoogleAccounts(): List<String> =
+        loaded.value.contacts.mapNotNull { c -> c.account?.takeIf { it.type == "com.google" }?.name?.takeIf(String::isNotBlank) }
+            .distinct().sorted()
 
     fun selectAll() {
         val l = loaded.value

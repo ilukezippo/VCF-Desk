@@ -5,7 +5,7 @@
     <string name="app_title_full">VCF Desk – Contacts Manager</string>
 
     <string name="source_device">On this phone</string>
-    <string name="source_add_google">Add Google account…</string>
+    <string name="source_add_google">Add Google account to this phone…</string>
     <string name="source_switcher">Contact source</string>
     <string name="google_sign_in_failed">Could not add the Google account: %1$s</string>
     <string name="google_sign_in_unavailable">Google sign-in is not available</string>
@@ -407,7 +407,10 @@
     <string name="settings_saved">Saved</string>
     <string name="settings_google">Google accounts</string>
     <string name="settings_google_none">No Google accounts added</string>
-    <string name="settings_google_add">Add Google account…</string>
+    <string name="settings_google_add">Add Google account to this phone…</string>
+    <string name="settings_google_info">Google contacts come from the Google accounts on this phone. Changes you make sync to Google Contacts (contacts.google.com) automatically. To edit another Google account, add it to the phone.</string>
+    <string name="banner_sync_off">Contacts sync is off for %1$s. Changes won\'t reach Google Contacts until it\'s on.</string>
+    <string name="banner_sync_off_fix">Turn on</string>
     <string name="settings_google_remove">Remove</string>
     <string name="settings_google_remove_title">Remove %1$s?</string>
     <string name="settings_google_remove_body">The account is only removed from this app. Its contacts are not deleted.</string>

@@ -4,11 +4,11 @@
 
 The first Android release, for phones and foldables (Android 8 and newer).
 
-- Edit your **phone's contacts or your Google contacts**; fields the app doesn't show are kept untouched
+- Edit your **phone's contacts and the Google accounts on your phone** (changes sync to Google Contacts); fields the app doesn't show are kept untouched
 - **Bulk edit** with a preview, an automatic backup and undo
 - **Import** (vCard, Excel, CSV) with column matching, and **export** (vCard, Google CSV, Outlook CSV, Excel)
 - Right-to-left Arabic, photos, and a two-pane list and editor on unfolded foldables and tablets
-- Google sign-in setup guide: docs/android/GOOGLE_SETUP.md
+- No sign-in and no internet access needed
 
 ## 1.0 — November 2026
 

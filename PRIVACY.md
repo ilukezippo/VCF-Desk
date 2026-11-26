@@ -11,7 +11,7 @@ VCF Desk works **entirely on your own computer**.
 ## Android app
 
 - Contacts on your phone are read and written on the phone only and never leave it.
-- If you choose **Google** as the source, the app talks only to Google's People API, for the account you signed in with, to read and change that account's contacts.
+- The app has no internet access. Changes to contacts of a Google account on your phone reach Google Contacts through Android's own sync, not through the app.
 - No analytics, no telemetry, no crash reports, no ads. Backups made before bulk edits stay in the app's own storage on your phone.
 
 ## Contact

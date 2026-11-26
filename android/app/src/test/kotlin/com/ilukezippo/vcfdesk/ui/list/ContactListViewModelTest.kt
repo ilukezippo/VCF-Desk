@@ -199,12 +199,10 @@ class ContactListViewModelTest {
         assertFalse(s.loading)
     }
 
-    @Test fun addGoogleAccountSavesAndSwitches() = runTest {
+    @Test fun onlyThePhoneIsOfferedAsASource() = runTest {
+        // Google contacts come through the phone's synced Google accounts, not a separate sign-in.
         val vm = vm()
-        vm.addGoogleAccount("Name1@Example.com")
-        assertEquals(listOf("name1@example.com"), saved)
-        assertEquals(SourceId.Google("name1@example.com"), vm.state.value.source)
-        assertEquals(listOf(SourceId.Device, SourceId.Google("name1@example.com")), vm.state.value.sources)
+        assertEquals(listOf<SourceId>(SourceId.Device), vm.state.value.sources)
     }
 
     @Test fun selectionDropsContactsThatDisappear() = runTest {

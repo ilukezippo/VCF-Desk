@@ -31,15 +31,7 @@ On GitHub open the repo -> **Settings -> Secrets and variables -> Actions -> New
 | `ANDROID_KEY_ALIAS` | `vcfdesk` |
 | `ANDROID_KEY_PASSWORD` | the key password |
 
-## 3. Google sign-in fingerprint
-
-Google needs the key's SHA-1 for the OAuth client (see [GOOGLE_SETUP.md](GOOGLE_SETUP.md)):
-
-```
-keytool -list -v -keystore vcfdesk-release.jks -alias vcfdesk
-```
-
-## 4. Publish
+## 3. Publish
 
 The Windows workflow creates the `v1.0` release. Once it exists:
 

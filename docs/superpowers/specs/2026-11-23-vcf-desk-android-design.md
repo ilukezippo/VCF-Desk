@@ -103,6 +103,8 @@ Fold layout: when unfolded, the list sits on the left and the editor or bulk she
 3. **Apply in batches** with a progress bar and cancel. Device contacts are written in batched operations; Google is written with batch requests of up to 200 contacts. If something fails part-way, report which contacts weren't changed.
 4. **Undo.** "Undo last change" restores the affected contacts from that backup. Older backups can be restored from the Backups screen.
 
+> **Change, 2026-11-26:** the separate Google sign-in (source 2) is switched off in the app. Google's contacts permission needs app verification and caps unverified apps at 100 users, and the Google accounts synced on the phone already give every user their Google contacts through source 1, with Android syncing edits to contacts.google.com. The app now offers "Add Google account to this phone" and warns when contacts sync is off. The People API code stays in the tree, unused.
+
 ### Google sign-in setup (needed for source 2)
 
 The People API needs an OAuth client in a Google Cloud project, linked to the app's package name and signing-key fingerprint. While the project stays in **Testing** mode, it works without Google's review for up to 100 test users that Mubarak adds by email. Anyone else downloading the APK can't use Google sign-in until the app passes Google's verification for the contacts scope; they can still use the phone source. The repo needs a short guide for creating the OAuth client. No client ID is needed in the code: Google matches the app by package name and signing key.

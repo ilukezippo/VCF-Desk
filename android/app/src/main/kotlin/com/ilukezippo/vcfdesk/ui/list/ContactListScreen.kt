@@ -120,6 +120,8 @@ fun ContactListScreen(
             }
         }
 
+        if (state.source == SourceId.Device) SyncOffBanner(state, vm)
+
         SearchRow(state, vm)
         FilterRow(state, vm)
 
@@ -422,5 +424,39 @@ internal object Thumbnails {
         } ?: return null
         cache.put(k, decoded)
         return decoded
+    }
+}
+
+
+/** Google accounts on the phone whose contacts sync is off: edits there never reach Google Contacts. */
+fun contactsSyncOff(emails: List<String>): List<String> = try {
+    if (!android.content.ContentResolver.getMasterSyncAutomatically()) emails
+    else emails.filter {
+        !android.content.ContentResolver.getSyncAutomatically(
+            android.accounts.Account(it, "com.google"), android.provider.ContactsContract.AUTHORITY,
+        )
+    }
+} catch (e: SecurityException) {
+    emptyList()
+}
+
+@Composable
+private fun SyncOffBanner(state: ListState, vm: ContactListViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var resumes by remember { mutableStateOf(0) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { resumes++ }
+    val off = remember(state.loading, state.accounts, resumes) { contactsSyncOff(vm.phoneGoogleAccounts()) }
+    if (off.isEmpty()) return
+    Surface(color = Sel, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.banner_sync_off, off.joinToString(", ")),
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SYNC_SETTINGS)) }
+            }) { Text(stringResource(R.string.banner_sync_off_fix)) }
+        }
     }
 }

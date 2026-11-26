@@ -101,13 +101,13 @@ Screenshots are coming soon.
 2. Open it from your browser's downloads or the Files app. Android asks you to **allow installing apps from this source** (your browser or Files): allow it, go back, and tap *Install*.
 3. Google Play Protect may say the app comes from outside the store. Choose **Install anyway**; the app is signed and open source.
 
-### Google sign-in
+### Google contacts
 
-Google contacts need a one-time setup that takes about 10 minutes: see [docs/android/GOOGLE_SETUP.md](docs/android/GOOGLE_SETUP.md). Phone contacts need no sign-in.
+No sign-in needed. The app edits the contacts of the **Google accounts already on your phone**, and Android syncs every change to [Google Contacts](https://contacts.google.com) by itself. To edit another Google account, tap **Add Google account to this phone**. If contacts sync is off for an account, the app shows a banner with a **Turn on** button.
 
 ### Android limits
 
-- Google sign-in works only for test users until the app goes through Google's verification
+- Google accounts must be added to the phone to be edited
 - **Org units** (department parts of a company) are not stored in Google contacts
 - Excel files can't hold very large photos; use vCard to keep them
 

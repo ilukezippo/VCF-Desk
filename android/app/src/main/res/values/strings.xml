@@ -46,7 +46,7 @@
     <string name="no_name">(No name)</string>
 
     <string name="perm_title">Contacts permission needed</string>
-    <string name="perm_body">VCF Desk reads and edits the contacts stored on this phone. Everything stays on your device; nothing is sent anywhere unless you add a Google account.</string>
+    <string name="perm_body">VCF Desk reads and edits the contacts stored on this phone. Everything stays on your device; nothing is sent anywhere.</string>
     <string name="perm_retry">Try again</string>
     <string name="perm_open_settings">Open app settings</string>
 

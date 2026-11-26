@@ -97,7 +97,7 @@ private data class Target(val source: SourceId, val account: AccountTag?)
 
 /** The writable accounts that hold contacts on this phone. */
 fun writableDeviceAccounts(context: Context): List<AccountTag> = try {
-    val types = ContentResolver.getSyncAdapterTypes()
+    val types = (ContentResolver.getSyncAdapterTypes() ?: emptyArray())
         .filter { it.authority == ContactsContract.AUTHORITY }.mapTo(HashSet()) { it.accountType }
     val tagger = SystemDeviceAccounts(context)
     AccountManager.get(context).accounts.filter { it.type in types }.map { tagger.tag(it.type, it.name) }.filter { !it.readOnly }

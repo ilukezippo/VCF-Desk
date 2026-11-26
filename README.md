@@ -88,12 +88,27 @@ Fields VCF Desk doesn't show (Android extras, iPhone custom labels, groups, UIDs
 
 VCF Desk also runs on Android phones and foldables (Android 8 and newer). It is the same idea as the Windows app: fix your contacts, change many at once, and never lose a field the app doesn't show.
 
-- **Your phone's contacts or your Google contacts:** pick the source inside the app. Phone contacts never leave the phone
+- **Your phone's contacts, including your Google accounts:** edits to a Google account on the phone sync to Google Contacts by themselves. Nothing ever leaves the phone through the app
 - **Bulk edit with a safety net:** change a field on many contacts, see a preview first, and every run is backed up so it can be undone
 - **Import and export:** vCard, Excel and CSV in; vCard, Google CSV, Outlook CSV and Excel out
 - **Arabic and photos handled properly,** and a two-pane list and editor on an unfolded Galaxy Z Fold or a tablet
 
-Screenshots are coming soon.
+<table>
+  <tr>
+    <td><img src="shots/android-list.png" alt="Contact list"></td>
+    <td><img src="shots/android-editor.png" alt="Contact editor"></td>
+    <td><img src="shots/android-select.png" alt="Select many contacts"></td>
+    <td><img src="shots/android-preview.png" alt="Preview before a bulk edit"></td>
+  </tr>
+  <tr>
+    <td align="center">Contacts from every account</td>
+    <td align="center">Edit any field</td>
+    <td align="center">Select many at once</td>
+    <td align="center">Preview before you apply</td>
+  </tr>
+</table>
+
+<p align="center"><img src="shots/android-fold.png" width="640" alt="Two-pane view on an unfolded Galaxy Z Fold"><br><sub>List and editor side by side on an unfolded Galaxy Z Fold</sub></p>
 
 ### Install
 

@@ -56,7 +56,7 @@ class SystemDeviceAccounts(private val context: Context) : DeviceAccounts {
     }
 
     private fun readOnly(type: String): Boolean {
-        val adapter = ContentResolver.getSyncAdapterTypes()
+        val adapter = (ContentResolver.getSyncAdapterTypes() ?: emptyArray())
             .firstOrNull { it.accountType == type && it.authority == ContactsContract.AUTHORITY }
         return adapter != null && !adapter.supportsUploading()
     }

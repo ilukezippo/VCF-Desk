@@ -108,6 +108,27 @@ fun writableDeviceAccounts(context: Context): List<AccountTag> = try {
 private fun sameAccount(a: AccountTag?, b: AccountTag?) =
     (a == null && b == null) || (a != null && b != null && a.type == b.type && a.name == b.name)
 
+private const val GOOGLE_TYPE = "com.google"
+
+/** The phone's raw Google account [a] is the same place as the signed-in Google source [g]. */
+private fun isGoogleAccount(a: AccountTag?, g: SourceId.Google) =
+    a != null && a.type == GOOGLE_TYPE && a.name.trim().equals(g.email.trim(), ignoreCase = true)
+
+/**
+ * True when copying or moving contacts from [current] (whose selected contacts are in
+ * [selectionAccounts]) to [target] (with [account], for the phone) would put them where they
+ * already are — including the same Google account reached once through the phone's synced
+ * account and once through Google sign-in.
+ */
+internal fun isSameTarget(current: SourceId, selectionAccounts: Set<AccountTag?>, target: SourceId, account: AccountTag?): Boolean =
+    when {
+        target == current -> target is SourceId.Google || selectionAccounts.any { sameAccount(it, account) }
+        current == SourceId.Device && target is SourceId.Google -> selectionAccounts.any { isGoogleAccount(it, target) }
+        current is SourceId.Google && target == SourceId.Device -> isGoogleAccount(account, current)
+        current is SourceId.Google && target is SourceId.Google -> current.email.trim().equals(target.email.trim(), ignoreCase = true)
+        else -> false
+    }
+
 /**
  * The bulk editor for a selection: pick one change, preview it from here. Previews, progress and
  * results are shown by [BulkStageDialogs].
@@ -318,8 +339,7 @@ private fun CopyMoveForm(
             { a -> a?.let { "${it.label} · ${it.name}" } ?: none }) { account = it }
     }
     // the exact same place the contacts are already in
-    val same = targetSource == current && (targetSource is SourceId.Google ||
-        selectionAccounts.any { sameAccount(it, account) })
+    val same = isSameTarget(current, selectionAccounts, targetSource, account)
     if (same) Text(stringResource(R.string.bulk_same_target), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
     Button(enabled = enabled && !same, onClick = { onPreview(BulkOp.CopyTo(sourceFor(targetSource), account, move)) }) {
         Text(stringResource(R.string.bulk_preview))

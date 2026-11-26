@@ -64,6 +64,12 @@ class PeopleApi(
     base: String = "https://people.googleapis.com/v1/",
     /** Delay before retry number `n` (1-based). */
     private val retryDelayMs: (Int) -> Long = { n -> 1000L shl (n - 1) },
+    /**
+     * Called with the token Google refused (HTTP 401) so it can be dropped from the cache; the
+     * call is then retried once with a fresh token from [token]. A 401 is answered before
+     * anything is done, so the retry can't duplicate.
+     */
+    private val onUnauthorized: suspend (String) -> Unit = {},
 ) {
     private val base: HttpUrl = base.toHttpUrl()
     private val jsonType = "application/json; charset=utf-8".toMediaType()
@@ -240,9 +246,11 @@ class PeopleApi(
      */
     private suspend fun call(method: String, url: HttpUrl, body: JsonObject?, creates: Boolean = false): JsonObject {
         var attempt = 0
+        var renewed = false
         while (true) {
+            val tok = token()
             val req = Request.Builder().url(url)
-                .header("Authorization", "Bearer ${token()}")
+                .header("Authorization", "Bearer $tok")
                 .method(method, body?.toString()?.toRequestBody(jsonType))
                 .build()
             val (code, text) = try {
@@ -252,6 +260,11 @@ class PeopleApi(
             }
             if (code in 200..299) {
                 return if (text.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(text) as? JsonObject ?: JsonObject(emptyMap())
+            }
+            if (code == 401 && !renewed) {
+                renewed = true
+                onUnauthorized(tok)
+                continue
             }
             if ((code == 429 || (code == 503 && !creates)) && attempt < MAX_RETRIES) {
                 attempt++

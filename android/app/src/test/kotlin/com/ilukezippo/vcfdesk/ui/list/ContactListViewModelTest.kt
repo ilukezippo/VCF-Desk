@@ -104,11 +104,21 @@ class ContactListViewModelTest {
         device.seed(c("Name 2", account = simTag))
         device.seed(c("Name 3", account = phoneTag))
         val vm = vm()
-        assertEquals(listOf("Google", "Phone"), vm.state.value.accounts)
-        vm.setAccountFilter("Google")
+        assertEquals(listOf("Google · name1@example.com", "Phone"), vm.state.value.accounts)
+        vm.setAccountFilter("Google · name1@example.com")
         assertEquals(listOf("Name 1", "Name 3"), vm.state.value.items.map { it.name.display })
         vm.setAccountFilter(null)
         assertEquals(3, vm.state.value.items.size)
+    }
+
+    @Test fun twoGoogleAccountsOnThePhoneAreToldApart() = runTest {
+        val other = AccountTag("com.google", "name2@example.com", "Google", readOnly = false)
+        device.seed(c("Name 1", account = phoneTag))
+        device.seed(c("Name 2", account = other))
+        val vm = vm()
+        assertEquals(listOf("Google · name1@example.com", "Google · name2@example.com"), vm.state.value.accounts)
+        vm.setAccountFilter("Google · name2@example.com")
+        assertEquals(listOf("Name 2"), vm.state.value.items.map { it.name.display })
     }
 
     @Test fun filterByGroup() = runTest {
@@ -178,7 +188,7 @@ class ContactListViewModelTest {
         google.seed(c("Name 9", account = phoneTag))
         val vm = vm()
         vm.toggleSelect(a.id)
-        vm.setAccountFilter("Google")
+        vm.setAccountFilter("Google · name1@example.com")
         vm.setQuery("name")
         vm.switchSource(SourceId.Google("name1@example.com"))
         val s = vm.state.value

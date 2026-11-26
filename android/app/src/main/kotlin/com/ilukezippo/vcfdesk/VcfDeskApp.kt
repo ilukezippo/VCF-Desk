@@ -34,7 +34,7 @@ class AppContainer(context: Context) {
         GoogleSource(email, PeopleApi(http, token = {
             val auth = googleAuth ?: throw java.io.IOException("Google sign-in is not available right now")
             auth.token(email)
-        }))
+        }, onUnauthorized = { refused -> googleAuth?.clearToken(refused) }))
     }
 
     fun source(id: SourceId): ContactSource = when (id) {

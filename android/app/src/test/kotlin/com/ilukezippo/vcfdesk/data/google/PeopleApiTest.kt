@@ -149,10 +149,23 @@ class PeopleApiTest {
     }
 
     @Test
-    fun unauthorizedIsNotRetried() = runTest {
+    fun unauthorizedClearsTheTokenAndRetriesOnceWithAFreshOne() = runTest {
+        val cleared = ArrayList<String>()
+        var n = 0
+        val api = PeopleApi(OkHttpClient(), { "tok-${++n}" }, server.url("/v1/").toString(), retryDelayMs = { 0L }, onUnauthorized = { cleared += it })
+        server.enqueue(json("""{"error":{"code":401,"message":"Invalid Credentials"}}""", 401))
+        server.enqueue(json("""{"createdPeople":[{"httpStatusCode":200,"person":{"resourceName":"people/n1"}}]}"""))
+        val ok = api.batchCreate(listOf(person(1)))
+        assertTrue(ok.single().isSuccess)
+        assertEquals(listOf("tok-1"), cleared)
+        assertEquals("Bearer tok-1", server.takeRequest().headers["Authorization"])
+        assertEquals("Bearer tok-2", server.takeRequest().headers["Authorization"])
+
+        // still refused with the fresh token: reported, not retried again
+        server.enqueue(json("""{"error":{"code":401,"message":"Invalid Credentials"}}""", 401))
         server.enqueue(json("""{"error":{"code":401,"message":"Invalid Credentials"}}""", 401))
         val res = api.batchCreate(listOf(person(1)))
-        assertEquals(1, server.requestCount)
+        assertEquals(4, server.requestCount)
         assertTrue(res.single().exceptionOrNull()!!.message!!.contains("sign in", ignoreCase = true))
     }
 

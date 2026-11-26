@@ -91,7 +91,7 @@ class ContactListViewModel(
 
     /** A load with the search text of each contact folded once. */
     private class Indexed(val loaded: Loaded, val texts: List<Searching.Prepared>) {
-        val accounts = loaded.contacts.mapNotNull { it.account?.label?.takeIf(String::isNotEmpty) }.distinct()
+        val accounts = loaded.contacts.mapNotNull { it.account?.let(::accountFilterName)?.takeIf(String::isNotEmpty) }.distinct()
         val groups = loaded.contacts.flatMap { it.groups }.distinct()
     }
 
@@ -176,7 +176,7 @@ class ContactListViewModel(
         if (current) {
             for (i in l.contacts.indices) {
                 val it = l.contacts[i]
-                if ((c.accountFilter == null || it.account?.label == c.accountFilter) &&
+                if ((c.accountFilter == null || it.account?.let(::accountFilterName) == c.accountFilter) &&
                     (c.groupFilter == null || c.groupFilter in it.groups) &&
                     Searching.matches(ix.texts[i], q)
                 ) matching += it
@@ -308,4 +308,13 @@ internal object Searching {
         yield(c.notes)
         yieldAll(c.groups)
     }.filter { it.isNotEmpty() }
+}
+
+/**
+ * How an account is named in the account filter: "label · name", so two Google accounts on the
+ * phone can be told apart; just the label when the account has no name of its own.
+ */
+fun accountFilterName(a: com.ilukezippo.vcfdesk.core.model.AccountTag): String {
+    val name = a.name.trim()
+    return if (name.isEmpty() || name.equals(a.label.trim(), ignoreCase = true)) a.label else "${a.label} · $name"
 }

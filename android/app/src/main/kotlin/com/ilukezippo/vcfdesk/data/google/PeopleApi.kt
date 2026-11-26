@@ -53,7 +53,8 @@ class PeopleApiException(
 
 /**
  * Thin client for the People API REST endpoints used by [GoogleSource]. Calls go through [http]
- * with a bearer token from [token]. 429/503 are retried with backoff up to [MAX_RETRIES] times.
+ * with a bearer token from [token]. 429/503 are retried with backoff up to [MAX_RETRIES] times
+ * (creates retry only 429: a 503 may follow a create that happened).
  * Batch calls split their input at the API limits; an HTTP-level failure of one chunk is reported
  * as a failure of every person in that chunk, and the other chunks still run.
  */
@@ -98,7 +99,7 @@ class PeopleApi(
 
     /** Creates a user contact group; returns it (with its resourceName). */
     suspend fun createGroup(name: String): JsonObject =
-        call("POST", url("contactGroups"), buildJsonObject { put("contactGroup", buildJsonObject { put("name", name) }) })
+        call("POST", url("contactGroups"), buildJsonObject { put("contactGroup", buildJsonObject { put("name", name) }) }, creates = true)
 
     /**
      * Updates [people] (resourceName → person, each carrying its etag) with one [updateMask],
@@ -158,7 +159,7 @@ class PeopleApi(
                 put("sources", JsonArray(listOf(JsonPrimitive(READ_SOURCES))))
             }
             val r = try {
-                call("POST", url("people:batchCreateContacts"), body)
+                call("POST", url("people:batchCreateContacts"), body, creates = true)
             } catch (e: PeopleApiException) {
                 chunk.forEach { _ -> out += Result.failure(e) }
                 continue
@@ -233,7 +234,11 @@ class PeopleApi(
         else Result.failure(errorOf(if (http in 200..299) 400 else http, status?.get("message")?.jsonPrimitive?.contentOrNull, code.toString()))
     }
 
-    private suspend fun call(method: String, url: HttpUrl, body: JsonObject?): JsonObject {
+    /**
+     * [creates]: the call makes something new. A 503 may come after the server already made it,
+     * so only 429 (refused before doing anything) is retried; retrying a 503 could duplicate.
+     */
+    private suspend fun call(method: String, url: HttpUrl, body: JsonObject?, creates: Boolean = false): JsonObject {
         var attempt = 0
         while (true) {
             val req = Request.Builder().url(url)
@@ -248,7 +253,7 @@ class PeopleApi(
             if (code in 200..299) {
                 return if (text.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(text) as? JsonObject ?: JsonObject(emptyMap())
             }
-            if ((code == 429 || code == 503) && attempt < MAX_RETRIES) {
+            if ((code == 429 || (code == 503 && !creates)) && attempt < MAX_RETRIES) {
                 attempt++
                 delay(retryDelayMs(attempt))
                 continue

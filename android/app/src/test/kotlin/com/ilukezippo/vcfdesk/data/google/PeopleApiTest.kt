@@ -129,6 +129,26 @@ class PeopleApiTest {
     }
 
     @Test
+    fun batchCreateRetriesRateLimitButNot503() = runTest {
+        server.enqueue(json("""{"error":{"code":503,"message":"busy"}}""", 503))
+        val res = api.batchCreate(listOf(person(1)))
+        assertEquals(1, server.requestCount) // a 503 may follow a create that happened: never re-sent
+        assertTrue(res.single().isFailure)
+        assertEquals(503, (res.single().exceptionOrNull() as PeopleApiException).httpCode)
+
+        server.enqueue(json("""{"error":{"code":429,"message":"slow down"}}""", 429))
+        server.enqueue(json("""{"createdPeople":[{"httpStatusCode":200,"person":{"resourceName":"people/n1"}}]}"""))
+        val ok = api.batchCreate(listOf(person(1)))
+        assertEquals(3, server.requestCount)
+        assertTrue(ok.single().isSuccess)
+
+        server.enqueue(json("""{"error":{"code":503,"message":"busy"}}""", 503))
+        val failed = try { api.createGroup("Family"); false } catch (e: PeopleApiException) { e.httpCode == 503 }
+        assertTrue(failed)
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
     fun unauthorizedIsNotRetried() = runTest {
         server.enqueue(json("""{"error":{"code":401,"message":"Invalid Credentials"}}""", 401))
         val res = api.batchCreate(listOf(person(1)))

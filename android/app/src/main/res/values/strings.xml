@@ -387,6 +387,10 @@
     <string name="backups_restore_title">Restore this backup?</string>
     <string name="backups_restore_body">Changes made by that %1$s are reverted where the contacts have not been changed since. What is overwritten is backed up first.</string>
     <string name="backups_restoring">Restoring…</string>
+    <string name="backups_restored_on">Restored on %1$s</string>
+    <string name="backups_restore_again_title">Restore this backup again?</string>
+    <string name="backups_restore_again_body">It was already restored on %1$s. Contacts it re-created then are reused, not added twice; restoring again only reverts what has changed back since.</string>
+    <string name="backups_restore_again">Restore again</string>
     <string name="backups_restored_title">Restore finished</string>
     <string name="backups_account_missing">This backup belongs to %1$s, which is no longer added. Add the account in Settings, then restore.</string>
     <string name="backups_restore_failed">Could not restore: %1$s</string>

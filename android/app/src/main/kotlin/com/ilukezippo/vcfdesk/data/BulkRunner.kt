@@ -104,7 +104,9 @@ class BulkRunner(private val store: BackupStore) {
      * what the bulk write changed: a field still as the write left it is restored; a field
      * already back as before is left alone; a field changed since is kept and reported as a
      * conflict. Untouched fields are never written, nor are contacts with nothing to restore.
-     * Contacts that are gone are re-created from the backup in their original account.
+     * Contacts that are gone are re-created from the backup in their original account, and the
+     * new ids recorded in the backup, so restoring it again finds them instead of making copies.
+     * Contacts an edit changed that were deleted since are reported, not re-created.
      * For a move, the copies are then removed from [target] (only those whose original is back).
      * Whatever undo overwrites or removes is itself backed up first (action "undo").
      */
@@ -123,19 +125,29 @@ class BulkRunner(private val store: BackupStore) {
         val writes = ArrayList<Pair<Contact, Contact>>() // current to restored
         val missing = ArrayList<Contact>()
         val back = LinkedHashSet<String>() // originals that are in the source once undo is done
+        // contacts an earlier restore of this backup re-created: those are the contacts now
+        val recreated = store.restored(backup)
+        suspend fun find(id: String): Contact? = try {
+            src.load(id)
+        } catch (ex: NoSuchElementException) {
+            null
+        }
         for (e in entries.distinctBy { it.before.id }) {
             val id = e.before.id
             val cur = try {
-                src.load(id)
+                find(id) ?: recreated[id]?.let { find(it) }
             } catch (ex: CancellationException) {
                 throw ex
-            } catch (ex: NoSuchElementException) {
-                null
             } catch (ex: Exception) {
                 // can't tell whether it exists: re-creating could duplicate it, so leave it
                 t.failed[id] = reason(ex); continue
             }
-            if (cur == null) { missing += e.before; continue }
+            if (cur == null) {
+                // an edit only changed fields: a contact deleted since was deleted on purpose
+                if (e.after != null) t.failed[id] = "deleted since the edit; not re-created"
+                else missing += e.before
+                continue
+            }
             back += id
             if (e.after == null) continue // nothing was written to it (a delete or move that didn't happen)
             val (restored, conflicts) = restoreFields(cur, e)
@@ -150,11 +162,20 @@ class BulkRunner(private val store: BackupStore) {
             t.add(res)
             recordActual(src, safety, res.written)
         }
+        val newIds = LinkedHashMap<String, String>()
         for ((acct, group) in missing.groupBy { it.account }) {
             val inputs = group.map { it.copy(etag = null, thumbnail = null) }
             val res = src.create(inputs, acct)
             t.add(res)
-            confirmedCreates(inputs.map { it.id }, res)?.let { back += it }
+            confirmedCreates(inputs.map { it.id }, res)?.let { ok ->
+                back += ok
+                newIds.putAll(ok.zip(res.written))
+            }
+        }
+        try {
+            store.recordRestore(backup, newIds)
+        } catch (ex: Exception) {
+            newIds.keys.forEach { t.failed.putIfAbsent(it, "restored, but not recorded: restoring this backup again would add it twice") }
         }
         if (move != null && target != null) {
             val copiesBackup = removeCopies(target, move, back, t)

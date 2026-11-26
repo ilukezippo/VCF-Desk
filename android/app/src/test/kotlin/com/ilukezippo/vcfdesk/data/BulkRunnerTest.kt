@@ -524,4 +524,59 @@ class BulkRunnerTest {
         assertTrue(pv, pv.startsWith("removed"))
         assertEquals(1, left)
     }
+
+    @Test
+    fun restoringADeleteBackupTwiceDoesNotDuplicate() = runTest {
+        val src = FakeSource()
+        val a = src.seed(person(1, withPhoto = true))
+        val b = src.seed(person(2))
+        val store = BackupStore(dir())
+        val runner = BulkRunner(store)
+        val r = runner.run(src, listOf(a.id, b.id), BulkOp.Delete) { _, _ -> }
+        assertEquals(0, src.all().size)
+        assertNull(store.list().single { it.file == r.backup!!.file }.restoredAt)
+
+        val u1 = runner.undo(src, r.backup!!)
+        assertEquals(2, u1.changed)
+        assertEquals(2, src.all().size)
+        val listed = store.list().single { it.file == r.backup!!.file }
+        assertNotNull(listed.restoredAt)
+        assertEquals(2, store.restored(listed).size)
+
+        val u2 = runner.undo(src, listed)
+        assertEquals(2, src.all().size) // no duplicates
+        assertEquals(0, u2.changed)
+        assertEquals(emptyMap<String, String>(), u2.failed)
+        assertEquals(1, src.log.count { it.startsWith("create") })
+    }
+
+    @Test
+    fun restoringAMoveTwiceDoesNotDuplicate() = runTest {
+        val src = FakeSource()
+        val target = FakeSource(SourceId.Google("me@example.com"))
+        val a = src.seed(person(1))
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, listOf(a.id), BulkOp.CopyTo(target, null, move = true)) { _, _ -> }
+        assertEquals(0, src.all().size)
+        assertEquals(1, target.all().size)
+        runner.undo(src, r.backup!!, target)
+        runner.undo(src, r.backup!!, target)
+        assertEquals(1, src.all().size)
+        assertEquals(0, target.all().size)
+    }
+
+    @Test
+    fun editBackupDoesNotRecreateAContactDeletedSince() = runTest {
+        val src = FakeSource()
+        val a = src.seed(person(1))
+        val b = src.seed(person(2))
+        val runner = BulkRunner(BackupStore(dir()))
+        val r = runner.run(src, listOf(a.id, b.id), edit) { _, _ -> }
+        src.delete(listOf(b.id))
+        val u = runner.undo(src, r.backup!!)
+        assertEquals(listOf(a.id), src.all().map { it.id })
+        assertEquals("Old Co", src.get(a.id)!!.org.company)
+        assertEquals("deleted since the edit; not re-created", u.failed[b.id])
+        assertTrue(src.log.none { it.startsWith("create") })
+    }
 }

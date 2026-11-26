@@ -14,7 +14,15 @@ import java.time.Clock
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-data class Backup(val file: File, val time: Instant, val action: String, val source: SourceId, val count: Int)
+/** [restoredAt]: when this backup was last restored, if ever. */
+data class Backup(
+    val file: File,
+    val time: Instant,
+    val action: String,
+    val source: SourceId,
+    val count: Int,
+    val restoredAt: Instant? = null,
+)
 
 /**
  * One backed-up contact. [before] is the contact as it was (lossless, full photo); [after] is
@@ -51,6 +59,9 @@ class BackupStore(private val dir: File, private val clock: Clock = Clock.system
         val entries: List<Entry>,
         val target: String? = null,
         val copies: Map<String, String> = emptyMap(),
+        /** Contacts a restore re-created: original id to the new contact's id. */
+        val restored: Map<String, String> = emptyMap(),
+        val restoredAt: String? = null,
     )
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = true }
@@ -126,6 +137,15 @@ class BackupStore(private val dir: File, private val clock: Clock = Clock.system
         writeMeta(b, m.copy(target = encode(target), copies = m.copies + copies))
     }
 
+    /** Contacts earlier restores re-created from this backup: original id to new id. */
+    fun restored(b: Backup): Map<String, String> = readMeta(b).restored
+
+    /** Records a restore: when, and which contacts it re-created (original id to new id). */
+    fun recordRestore(b: Backup, recreated: Map<String, String>) {
+        val m = readMeta(b)
+        writeMeta(b, m.copy(restored = m.restored + recreated, restoredAt = clock.instant().toString()))
+    }
+
     fun move(b: Backup): MoveRecord? {
         val m = readMeta(b)
         return m.target?.let { MoveRecord(decode(it), m.copies) }
@@ -139,7 +159,7 @@ class BackupStore(private val dir: File, private val clock: Clock = Clock.system
                     val m = json.decodeFromString(Meta.serializer(), f.readText(Charsets.UTF_8))
                     val vcf = File(dir, m.vcf)
                     if (!vcf.isFile) null
-                    else Backup(vcf, Instant.parse(m.time), m.action, decode(m.source), m.count)
+                    else Backup(vcf, Instant.parse(m.time), m.action, decode(m.source), m.count, m.restoredAt?.let(Instant::parse))
                 } catch (e: Exception) {
                     null
                 }

@@ -85,6 +85,12 @@ fun BackupsScreen(vm: BackupsViewModel, onBack: () -> Unit) {
                                     pluralStringResource(R.plurals.backups_count, b.count, b.count),
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            b.restoredAt?.let { at ->
+                                Text(
+                                    stringResource(R.string.backups_restored_on, whenFormat.format(at.atZone(ZoneId.systemDefault()))),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(enabled = restore !is RestoreState.Running, onClick = { confirm = b }) { Text(stringResource(R.string.backups_restore)) }
                                 OutlinedButton(onClick = { context.startShare(b.file, "text/x-vcard", shareTitle) }) { Text(stringResource(R.string.backups_share)) }
@@ -97,11 +103,21 @@ fun BackupsScreen(vm: BackupsViewModel, onBack: () -> Unit) {
     }
 
     confirm?.let { b ->
+        val again = b.restoredAt?.let { whenFormat.format(it.atZone(ZoneId.systemDefault())) }
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(stringResource(R.string.backups_restore_title)) },
-            text = { Text(stringResource(R.string.backups_restore_body, actionLabel(b.action).lowercase())) },
-            confirmButton = { TextButton(onClick = { confirm = null; vm.restore(b) }) { Text(stringResource(R.string.backups_restore)) } },
+            title = { Text(stringResource(if (again != null) R.string.backups_restore_again_title else R.string.backups_restore_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (again != null) Text(stringResource(R.string.backups_restore_again_body, again))
+                    Text(stringResource(R.string.backups_restore_body, actionLabel(b.action).lowercase()))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { confirm = null; vm.restore(b) }) {
+                    Text(stringResource(if (again != null) R.string.backups_restore_again else R.string.backups_restore))
+                }
+            },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }

@@ -53,7 +53,7 @@ sealed interface RowOp {
 
 /**
  * Maps raw-contact Data rows to the model and back. Rows the model can't represent (unknown
- * mimetypes, a second Organization/Note/Name row, membership of an unknown group) become
+ * mimetypes, a second Organization/Note/Name row, membership of an unknown or system group) become
  * `Extra("device", mimetype)` and are never touched by [diff]; nor are columns the model
  * doesn't cover (diff writes only the columns whose mapped value changed).
  */

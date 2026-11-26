@@ -27,6 +27,7 @@ class FakeContactsProvider : ContentProvider() {
     class Group(
         val id: Long, val title: String, val type: String?, val name: String?,
         val deleted: Boolean = false, val visible: Boolean = true,
+        val systemId: String? = null, val readOnly: Boolean = false, val autoAdd: Boolean = false,
     )
 
     val raws = linkedMapOf<Long, Raw>()
@@ -59,9 +60,12 @@ class FakeContactsProvider : ContentProvider() {
         return id
     }
 
-    fun addGroup(title: String, type: String? = null, name: String? = null): Long {
+    fun addGroup(
+        title: String, type: String? = null, name: String? = null,
+        systemId: String? = null, readOnly: Boolean = false, autoAdd: Boolean = false,
+    ): Long {
         val id = nextGroup++
-        groups[id] = Group(id, title, type, name)
+        groups[id] = Group(id, title, type, name, systemId = systemId, readOnly = readOnly, autoAdd = autoAdd)
         return id
     }
 
@@ -100,6 +104,8 @@ class FakeContactsProvider : ContentProvider() {
                 mapOf(
                     "_id" to it.id, "title" to it.title, "account_type" to it.type,
                     "account_name" to it.name, "deleted" to if (it.deleted) 1 else 0,
+                    "system_id" to it.systemId, "group_is_read_only" to if (it.readOnly) 1 else 0,
+                    "auto_add" to if (it.autoAdd) 1 else 0,
                 )
             }
             else -> error("unexpected query $uri")
@@ -107,7 +113,7 @@ class FakeContactsProvider : ContentProvider() {
         val allCols = when (table(uri)) {
             "data" -> dataCols
             "raw_contacts" -> listOf("_id", "account_type", "account_name", "deleted", "version")
-            else -> listOf("_id", "title", "account_type", "account_name", "deleted")
+            else -> listOf("_id", "title", "account_type", "account_name", "deleted", "system_id", "group_is_read_only", "auto_add")
         }
         val cols = projection?.toList() ?: allCols
         cols.forEach { require(it in allCols) { "unknown column $it" } }

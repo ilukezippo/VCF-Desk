@@ -351,4 +351,34 @@ class DeviceSourceTest {
         assertTrue(gm.values["data1"] != otherAccountFamily.toString())
         assertEquals(setOf("Family"), src.load(id.toString()).groups)
     }
+
+    @Test
+    fun systemGroupsAreNotLabelsAndTheirMembershipsSurviveEdits() = runTest {
+        val gm = ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE
+        val id = person(1, "com.google")
+        val myContacts = fake.addGroup("My Contacts", "com.google", "me", systemId = "Contacts", autoAdd = true)
+        val starred = fake.addGroup("Starred in Android", "com.google", "me", systemId = "Starred")
+        val locked = fake.addGroup("Coworkers", "com.google", "me", readOnly = true)
+        val family = fake.addGroup("Family", "com.google", "me")
+        val sysRows = listOf(myContacts, starred, locked).map { fake.addRow(id, gm, "data1" to it) }
+        fake.addRow(id, gm, "data1" to family)
+        val src = source(this)
+        assertEquals(listOf("Family"), src.groups())
+        val c = src.load(id.toString())
+        assertEquals(setOf("Family"), c.groups)
+
+        // removing every label, and renaming, never touches the system memberships
+        src.update(listOf(c.copy(groups = emptySet(), notes = "changed")))
+        val after = fake.rowsOf(id).filter { it.mimetype == gm }
+        assertEquals(sysRows.toSet(), after.map { it.id }.toSet())
+        assertEquals(emptySet<String>(), src.load(id.toString()).groups)
+
+        // a label with a system group's title is a new user group, not the system one
+        val again = src.load(id.toString())
+        src.update(listOf(again.copy(groups = setOf("My Contacts"))))
+        val rows = fake.rowsOf(id).filter { it.mimetype == gm }
+        assertEquals(4, rows.size)
+        assertTrue(sysRows.all { r -> rows.any { it.id == r } })
+        assertEquals(setOf("My Contacts"), src.load(id.toString()).groups)
+    }
 }

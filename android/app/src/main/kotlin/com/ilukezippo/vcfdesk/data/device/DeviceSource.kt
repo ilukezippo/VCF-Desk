@@ -166,12 +166,22 @@ class DeviceSource(
             .filter { it.id in ch }
     }.associateBy { it.id }
 
+    /**
+     * The account's user groups, the only ones shown as labels. System groups ("My Contacts",
+     * "Starred in Android"…: a SYSTEM_ID, read-only, or auto-add) are left out, so their
+     * membership rows are unknown rows to the mapper and never touched.
+     */
     private fun queryGroups(): List<GroupInfo> {
-        val proj = arrayOf(Groups._ID, Groups.TITLE, Groups.ACCOUNT_TYPE, Groups.ACCOUNT_NAME)
+        val proj = arrayOf(
+            Groups._ID, Groups.TITLE, Groups.ACCOUNT_TYPE, Groups.ACCOUNT_NAME,
+            Groups.SYSTEM_ID, Groups.GROUP_IS_READ_ONLY, Groups.AUTO_ADD,
+        )
         val out = ArrayList<GroupInfo>()
         resolver.query(Groups.CONTENT_URI, proj, "${Groups.DELETED}=0", emptyArray(), null)?.use { c ->
+            fun flag(col: String) = c.str(col)?.trim()?.toIntOrNull()?.let { it != 0 } == true
             while (c.moveToNext()) {
                 val title = c.str(Groups.TITLE) ?: continue
+                if (c.str(Groups.SYSTEM_ID) != null || flag(Groups.GROUP_IS_READ_ONLY) || flag(Groups.AUTO_ADD)) continue
                 out += GroupInfo(c.getLong(0), title, c.str(Groups.ACCOUNT_TYPE), c.str(Groups.ACCOUNT_NAME))
             }
         }

@@ -256,10 +256,15 @@ class GoogleSource(private val email: String, private val api: PeopleApi) : Cont
             cs.forEachIndexed { i, c ->
                 val gErr = c.groups.firstNotNullOfOrNull { groupErrors[it] }
                 if (gErr != null) { res.fail(key(i), gErr); return@forEachIndexed }
-                // a new person: nothing from another source's ids, etag or person JSON is carried over
+                // a new person: nothing from another source's ids, etag or person JSON is carried over,
+                // except when re-creating a person of this very account (undo): then everything the
+                // model doesn't cover (userDefined, starred, occupations…) is re-created from it
+                val seed = if (c.account?.type == account.type && c.account?.name.equals(email, ignoreCase = true)) {
+                    PeopleMapper.original(c)?.let(PeopleMapper::seedFor)
+                } else null
                 val fresh = c.copy(id = "", etag = null, extras = c.extras.filter { it.kind != PeopleMapper.EXTRA_KIND })
                 try {
-                    toSend += i to PeopleMapper.toPerson(fresh, ids)
+                    toSend += i to PeopleMapper.toPerson(fresh, ids, seed)
                 } catch (e: IllegalArgumentException) {
                     res.fail(key(i), reason(e))
                 }

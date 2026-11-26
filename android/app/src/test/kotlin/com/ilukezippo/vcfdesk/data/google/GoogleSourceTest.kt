@@ -237,6 +237,55 @@ class GoogleSourceTest {
     }
 
     @Test
+    fun recreatingAPersonOfThisAccountKeepsWhatTheModelLacks() = runTest {
+        routes["POST /v1/people:batchCreateContacts"] = { b ->
+            val n = b!!.getValue("contacts").jsonArray.size
+            json("""{"createdPeople":[${(0 until n).joinToString(",") { """{"httpStatusCode":200,"person":{"resourceName":"people/n$it","etag":"x"}}""" }}]}""")
+        }
+        routes["GET /v1/people/me/connections"] = {
+            json(
+                """{"connections":[${personJson(
+                    1,
+                    extra = ""","occupations":[{"value":"Pilot"}],"metadata":{"sources":[{"type":"CONTACT","id":"1"}]},""" +
+                        """"photos":[{"url":"https://x/p","default":true}],""" +
+                        """"emailAddresses":[{"value":"n1@example.com","metadata":{"primary":true,"source":{"type":"CONTACT","id":"1"}}},""" +
+                        """{"value":"profile@example.com","metadata":{"source":{"type":"PROFILE","id":"2"}}}]""",
+                ).replace(
+                    """"memberships":[""",
+                    """"memberships":[{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/starred"}},""" +
+                        """{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/gone"}},""" +
+                        """{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/abc"}},""",
+                )}]}""",
+            )
+        }
+        val c = source.load("people/c1")
+        assertEquals(setOf("Family"), c.groups)
+        // undo of a delete: the backed-up contact, with its person JSON, back into the same account
+        source.create(listOf(c.copy(etag = null)), source.account)
+        // a copy from elsewhere (no account of this source) starts from nothing
+        source.create(listOf(c.copy(etag = null, account = null)), null)
+        val sent = calls("POST /v1/people:batchCreateContacts").map {
+            it.second!!.getValue("contacts").jsonArray.single().jsonObject.getValue("contactPerson").jsonObject
+        }
+        val p = sent[0]
+        assertTrue("resourceName" !in p && "etag" !in p && "metadata" !in p && "photos" !in p)
+        assertEquals("v1", p.getValue("userDefined").jsonArray[0].jsonObject.getValue("value").jsonPrimitive.content)
+        assertEquals("Pilot", p.getValue("occupations").jsonArray[0].jsonObject.getValue("value").jsonPrimitive.content)
+        val groups = p.getValue("memberships").jsonArray.map {
+            it.jsonObject.getValue("contactGroupMembership").jsonObject.getValue("contactGroupResourceName").jsonPrimitive.content
+        }
+        assertEquals(setOf("contactGroups/starred", "contactGroups/myContacts", "contactGroups/abc"), groups.toSet())
+        val emails = p.getValue("emailAddresses").jsonArray.map { it.jsonObject }
+        assertEquals(listOf("n1@example.com"), emails.map { it.getValue("value").jsonPrimitive.content })
+        assertEquals("""{"primary":true}""", emails[0].getValue("metadata").toString())
+        assertEquals("Engineer", p.getValue("organizations").jsonArray[0].jsonObject.getValue("title").jsonPrimitive.content)
+
+        val q = sent[1]
+        assertTrue("userDefined" !in q && "occupations" !in q)
+        assertEquals("5555555" + "1", q.getValue("phoneNumbers").jsonArray[0].jsonObject.getValue("value").jsonPrimitive.content)
+    }
+
+    @Test
     fun deleteRetriesSinglyAndTreatsNotFoundAsDone() = runTest {
         var first = true
         routes["POST /v1/people:batchDeleteContacts"] = { b ->

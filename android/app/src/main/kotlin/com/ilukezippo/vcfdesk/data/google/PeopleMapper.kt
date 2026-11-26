@@ -372,15 +372,57 @@ object PeopleMapper {
 
     private fun Address.parts() = listOf(street, poBox, extended, city, region, postcode, country)
 
+    /** System groups a re-created person may rejoin (they exist in every account). */
+    private val SYSTEM_GROUPS = setOf(
+        MY_CONTACTS, "contactGroups/starred", "contactGroups/friends", "contactGroups/family", "contactGroups/coworkers",
+    )
+
+    /** Keys that describe one person record (or are read-only) and never go into a new one. */
+    private val NOT_FOR_NEW = setOf("resourceName", "etag", "metadata", "photos", "coverPhotos", "ageRange", "ageRanges")
+
+    /**
+     * A person to re-create [person] from, in the same account (undo of a delete or move): every
+     * key the contact itself holds — userDefined, occupations, starred and other system
+     * memberships, entries' unmodelled keys — minus what belongs to the old record (resource
+     * name, etag, metadata, photos), entries from other sources (profile), entry source ids,
+     * and user-group memberships (those are re-added by name, so a deleted group can't fail it).
+     */
+    fun seedFor(person: JsonObject): JsonObject {
+        val out = LinkedHashMap<String, JsonElement>()
+        for ((k, v) in person) {
+            if (k in NOT_FOR_NEW) continue
+            if (k == "memberships") {
+                out[k] = JsonArray((v as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.filter { membershipName(it) in SYSTEM_GROUPS })
+                continue
+            }
+            out[k] = if (v is JsonArray) JsonArray(v.mapNotNull { e ->
+                if (e is JsonObject) {
+                    if (!isOwn(e)) null
+                    else {
+                        val m = e.obj("metadata")
+                        val primary = m?.get("primary")
+                        val rest = LinkedHashMap<String, JsonElement>(e)
+                        rest.remove("metadata")
+                        if (primary != null) rest["metadata"] = JsonObject(mapOf("primary" to primary))
+                        JsonObject(rest)
+                    }
+                } else e
+            }) else v
+        }
+        return JsonObject(out)
+    }
+
     /**
      * The person to send for [c]: its original (when [c] carries one for the same resource) with
-     * the changed modelled fields rewritten; otherwise a new person (which also joins My Contacts).
+     * the changed modelled fields rewritten; otherwise a new person (which also joins My Contacts),
+     * built on [seed] (from [seedFor]) when given, so data the model lacks is re-created too.
      * [groupIds] maps group names to resource names and must hold every name in `c.groups`.
      */
-    fun toPerson(c: Contact, groupIds: Map<String, String>): JsonObject {
+    fun toPerson(c: Contact, groupIds: Map<String, String>, seed: JsonObject? = null): JsonObject {
         val orig = original(c)
-        val p = orig ?: JsonObject(emptyMap())
-        val before = orig?.let { toContact(it, groupIds.entries.associate { (k, v) -> v to k }) } ?: Contact()
+        val base = orig ?: seed
+        val p = base ?: JsonObject(emptyMap())
+        val before = base?.let { toContact(it, groupIds.entries.associate { (k, v) -> v to k }) } ?: Contact()
         val changed = changedFields(before, c)
         val out = LinkedHashMap<String, JsonElement>(p)
         fun set(k: String, own: List<JsonObject>) {

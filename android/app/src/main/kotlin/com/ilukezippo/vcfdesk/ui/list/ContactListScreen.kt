@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -46,6 +47,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -242,26 +244,26 @@ private fun SearchRow(state: ListState, vm: ContactListViewModel) {
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The field keeps its own text and cursor. Reading the text back from the list state
-        // (which updates a moment later) moved the cursor while typing joined scripts like Arabic.
-        var text by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
-            mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(state.query))
+        // State-based field: the keyboard edits [field] directly, so Arabic composing (letters that
+        // join while typing) keeps its cursor. The list only reads the text; it never writes it back.
+        val field = androidx.compose.foundation.text.input.rememberTextFieldState(state.query)
+        LaunchedEffect(field) {
+            androidx.compose.runtime.snapshotFlow { field.text.toString() }.collect { vm.setQuery(it) }
         }
         OutlinedTextField(
-            value = text,
-            onValueChange = { text = it; if (it.text != state.query) vm.setQuery(it.text) },
-            singleLine = true,
+            state = field,
+            lineLimits = androidx.compose.foundation.text.input.TextFieldLineLimits.SingleLine,
             placeholder = { Text(stringResource(R.string.search_hint)) },
             leadingIcon = { Icon(Icons.Filled.Search, null) },
             trailingIcon = {
-                if (text.text.isNotEmpty()) {
-                    IconButton(onClick = { text = androidx.compose.ui.text.input.TextFieldValue(""); vm.setQuery("") }) {
+                if (field.text.isNotEmpty()) {
+                    IconButton(onClick = { field.clearText() }) {
                         Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.search_clear))
                     }
                 }
             },
             textStyle = TextStyle(textDirection = TextDirection.Content),
-            keyboardOptions = KeyboardOptions.Default,
+            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = androidx.compose.ui.text.input.ImeAction.Search),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.weight(1f),
         )

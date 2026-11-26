@@ -14,6 +14,7 @@ import com.ilukezippo.vcfdesk.data.backup.Backup
 import com.ilukezippo.vcfdesk.data.backup.BackupEntry
 import com.ilukezippo.vcfdesk.data.backup.BackupStore
 import com.ilukezippo.vcfdesk.data.backup.MoveRecord
+import com.ilukezippo.vcfdesk.data.device.DeviceSnapshot
 import com.ilukezippo.vcfdesk.data.google.PeopleMapper
 import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
@@ -59,7 +60,13 @@ class BulkRunner(private val store: BackupStore) {
             BulkOp.Delete -> cs.map { effect(it, "deleted") }
             is BulkOp.CopyTo -> {
                 val where = op.account?.label?.ifBlank { null } ?: op.account?.name ?: placeName(op.target.id)
-                cs.map { effect(it, (if (op.move) "moved to " else "copied to ") + where) }
+                cs.map { c ->
+                    val d = effect(c, (if (op.move) "moved to " else "copied to ") + where)
+                    // a move deletes the original: say what the copy won't have, so copy can be chosen instead
+                    val lost = if (op.move) lostOnMove(c) else emptyList()
+                    if (lost.isEmpty()) d
+                    else d.copy(changes = d.changes + FieldDiff(LOST_LABEL, "", "${nameOf(c)}: some details won't move — ${lost.joinToString(", ")}"))
+                }
             }
             BulkOp.RemoveExactDuplicates -> duplicates(cs).map { d ->
                 if (d.lacks.isEmpty()) effect(d.contact, "removed (duplicate of ${nameOf(d.keeper)})")
@@ -306,7 +313,11 @@ class BulkRunner(private val store: BackupStore) {
         progress(0, total)
         // ids stay on the copies only so the target can key its failures by them
         val inputIds = cs.map { it.id }
-        val created = op.target.create(cs.map { it.copy(etag = null, account = op.account) }, op.account) { progress(it, total) }
+        // the source's own snapshots (device rows, person JSON) mean nothing in another place
+        val inputs = cs.map { c ->
+            c.copy(etag = null, account = op.account, extras = c.extras.filterNot { DeviceSnapshot.isSnapshot(it) || it.kind == PeopleMapper.EXTRA_KIND })
+        }
+        val created = op.target.create(inputs, op.account) { progress(it, total) }
         if (!op.move) {
             t.add(created)
             return t.report(null)
@@ -415,9 +426,45 @@ class BulkRunner(private val store: BackupStore) {
         if (!k.groups.containsAll(c.groups)) out += "groups"
         if (c.photo?.isNotEmpty() == true && k.photo?.isNotEmpty() != true) out += "photo"
         // source data the model doesn't know; the Google person JSON is compared key by key
-        if (c.extras.any { it.kind != PeopleMapper.EXTRA_KIND && it !in k.extras }) out += "other data"
+        if (c.extras.any { it.kind != PeopleMapper.EXTRA_KIND && it.kind != DeviceSnapshot.RAW && it !in k.extras }) out += "other data"
+        // the raw contact's own settings (not its account) count as data
+        val cr = DeviceSnapshot.raw(c.extras); val kr = DeviceSnapshot.raw(k.extras)
+        if (cr != null && ((cr.starred?.trim() == "1" && kr?.starred?.trim() != "1") ||
+                (!cr.ringtone.isNullOrBlank() && cr.ringtone != kr?.ringtone) ||
+                (cr.voicemail?.trim() == "1" && kr?.voicemail?.trim() != "1"))
+        ) out += "starred or ringtone"
         if (PeopleMapper.hasUnmodelledDataMissingFrom(c, k)) out += "other Google data"
         return out
+    }
+
+    /** What a copy of [c] in another place won't hold (the model, or the target, has no room for it). */
+    private fun lostOnMove(c: Contact): List<String> {
+        val out = LinkedHashSet<String>()
+        if (c.org.units.any { it.isNotBlank() }) out += "organization units"
+        val typed = c.phones + c.emails + c.websites + c.events + c.relations + c.ims
+        if (typed.any { it.params.isNotEmpty() } || c.addresses.any { it.params.isNotEmpty() }) out += "field parameters"
+        val rows = DeviceSnapshot.rows(c.extras)
+        val mimes = if (rows.isNotEmpty()) rows.map { it.mimetype } else c.extras.filter { it.kind == "device" }.map { it.raw }
+        mimes.mapTo(out, ::mimeName)
+        DeviceSnapshot.raw(c.extras)?.let { r ->
+            if (r.starred?.trim() == "1") out += "starred"
+            if (!r.ringtone.isNullOrBlank()) out += "ringtone"
+            if (r.voicemail?.trim() == "1") out += "send to voicemail"
+        }
+        out += PeopleMapper.unmodelledFields(c)
+        if (c.extras.any { it.kind == "vcard" }) out += "other vCard data"
+        return out.toList()
+    }
+
+    private fun mimeName(m: String): String = when (m) {
+        "vnd.android.cursor.item/group_membership" -> "system groups"
+        "vnd.android.cursor.item/sip_address" -> "SIP address"
+        "vnd.android.cursor.item/identity" -> "identity"
+        "vnd.android.cursor.item/name" -> "second name"
+        "vnd.android.cursor.item/organization" -> "second company"
+        "vnd.android.cursor.item/note" -> "second note"
+        "vnd.android.cursor.item/nickname" -> "second nickname"
+        else -> m.substringAfterLast('/').removePrefix("vnd.").ifEmpty { m }
     }
 
     // ---- text ----
@@ -437,6 +484,9 @@ class BulkRunner(private val store: BackupStore) {
 
     companion object {
         /** Shown when a bulk change or restore ran out of memory (full photos are held while backing up). */
+        /** Preview label of a move's "some details won't move" line. */
+        const val LOST_LABEL = "Some details won't move"
+
         const val TOO_MANY_PHOTOS = "Too many contacts with photos at once — select fewer"
     }
 }

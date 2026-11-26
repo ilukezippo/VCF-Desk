@@ -22,7 +22,10 @@ import java.io.FileNotFoundException
  * and records every call so tests can assert what was (not) touched.
  */
 class FakeContactsProvider : ContentProvider() {
-    class Raw(val id: Long, val type: String?, val name: String?, var deleted: Boolean = false, var version: Int = 1)
+    class Raw(
+        val id: Long, val type: String?, val name: String?, var deleted: Boolean = false, var version: Int = 1,
+        var starred: Int = 0, var ringtone: String? = null, var voicemail: Int = 0,
+    )
     class Row(val id: Long, val rawId: Long, val mimetype: String, val values: MutableMap<String, Any?>)
     class Group(
         val id: Long, val title: String, val type: String?, val name: String?,
@@ -92,6 +95,7 @@ class FakeContactsProvider : ContentProvider() {
                 mapOf(
                     "_id" to it.id, "account_type" to it.type, "account_name" to it.name,
                     "deleted" to if (it.deleted) 1 else 0, "version" to it.version,
+                    "starred" to it.starred, "custom_ringtone" to it.ringtone, "send_to_voicemail" to it.voicemail,
                 )
             }
             "data" -> data.values.map { r ->
@@ -112,7 +116,7 @@ class FakeContactsProvider : ContentProvider() {
         }
         val allCols = when (table(uri)) {
             "data" -> dataCols
-            "raw_contacts" -> listOf("_id", "account_type", "account_name", "deleted", "version")
+            "raw_contacts" -> listOf("_id", "account_type", "account_name", "deleted", "version", "starred", "custom_ringtone", "send_to_voicemail")
             else -> listOf("_id", "title", "account_type", "account_name", "deleted", "system_id", "group_is_read_only", "auto_add")
         }
         val cols = projection?.toList() ?: allCols
@@ -165,6 +169,11 @@ class FakeContactsProvider : ContentProvider() {
         val out = when (table(uri)) {
             "raw_contacts" -> {
                 val id = addRaw(v.getAsString("account_type"), v.getAsString("account_name"))
+                raws.getValue(id).apply {
+                    starred = v.getAsInteger("starred") ?: 0
+                    ringtone = v.getAsString("custom_ringtone")
+                    voicemail = v.getAsInteger("send_to_voicemail") ?: 0
+                }
                 ContentUris.withAppendedId(RawContacts.CONTENT_URI, id)
             }
             "groups" -> {

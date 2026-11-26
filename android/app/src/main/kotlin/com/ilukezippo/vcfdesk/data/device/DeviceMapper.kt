@@ -165,6 +165,10 @@ object DeviceMapper {
         )
     }
 
+    /** The rows [toContact] leaves to the source (other than photos), for a lossless snapshot. */
+    fun unmodelledRows(rows: List<DataRow>, groupTitles: Map<Long, String>): List<DataRow> =
+        sort(rows) { groupTitles[it] }.untouched.filter { it.mimetype != PHOTO }
+
     private fun typedOf(s: Sorted, i: Int) = TYPED[i].let { k -> s.typed[k.mime].orEmpty().map { readTyped(k, it) } }
 
     /**

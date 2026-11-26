@@ -381,4 +381,41 @@ class DeviceSourceTest {
         assertTrue(sysRows.all { r -> rows.any { it.id == r } })
         assertEquals(setOf("My Contacts"), src.load(id.toString()).groups)
     }
+
+    @Test
+    fun undoRecreateInTheSameAccountPutsBackUnmodelledRowsAndRawSettings() = runTest {
+        val gm = ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE
+        val sip = "vnd.android.cursor.item/sip_address"
+        val custom = "vnd.example.cursor.item/custom"
+        val id = person(1, "com.google")
+        val myContacts = fake.addGroup("My Contacts", "com.google", "me", systemId = "Contacts")
+        val gone = fake.addGroup("Old", "com.google", "me", systemId = "Old")
+        fake.addRow(id, gm, "data1" to myContacts)
+        fake.addRow(id, gm, "data1" to gone)
+        fake.addRow(id, sip, "data1" to "sip:name1@example.com", "data2" to "1")
+        val blob = ByteArray(300) { it.toByte() }
+        fake.addRow(id, custom, "data1" to "x", "data15" to blob)
+        fake.raws.getValue(id).apply { starred = 1; ringtone = "content://ring/1"; voicemail = 1 }
+        val src = source(this)
+        val c = src.load(id.toString())
+
+        // the system group disappears before the undo: that one membership is not re-inserted
+        fake.groups.remove(gone)
+        val r = src.create(listOf(c.copy(etag = null, thumbnail = null)), c.account)
+        val newId = r.written.single().toLong()
+        val rows = fake.rowsOf(newId)
+        assertEquals("sip:name1@example.com", rows.single { it.mimetype == sip }.values["data1"])
+        assertArrayEquals(blob, rows.single { it.mimetype == custom }.values["data15"] as ByteArray)
+        assertEquals(listOf(myContacts.toString()), rows.filter { it.mimetype == gm }.map { it.values["data1"] })
+        val raw = fake.raws.getValue(newId)
+        assertEquals(1, raw.starred)
+        assertEquals("content://ring/1", raw.ringtone)
+        assertEquals(1, raw.voicemail)
+
+        // into another account (a copy) none of it goes along
+        val other = src.create(listOf(c.copy(etag = null, thumbnail = null, account = null)), null)
+        val otherId = other.written.single().toLong()
+        assertTrue(fake.rowsOf(otherId).none { it.mimetype == sip || it.mimetype == custom || it.mimetype == gm })
+        assertEquals(0, fake.raws.getValue(otherId).starred)
+    }
 }

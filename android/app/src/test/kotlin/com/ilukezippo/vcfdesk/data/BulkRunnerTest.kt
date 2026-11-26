@@ -579,4 +579,50 @@ class BulkRunnerTest {
         assertEquals("deleted since the edit; not re-created", u.failed[b.id])
         assertTrue(src.log.none { it.startsWith("create") })
     }
+
+    @Test
+    fun movePreviewSaysWhatWontMoveAndCopiesLeaveSnapshotsBehind() = runTest {
+        val src = FakeSource()
+        val target = FakeSource(SourceId.Google("me@example.com"))
+        val rich = src.seed(
+            person(1).copy(
+                org = Org(company = "Old Co", units = listOf("Unit A")),
+                extras = listOf(
+                    com.ilukezippo.vcfdesk.data.device.DeviceSnapshot.rowExtra(
+                        com.ilukezippo.vcfdesk.data.device.DataRow(null, "vnd.android.cursor.item/sip_address", mapOf("data1" to "sip:a@b")),
+                    ),
+                    com.ilukezippo.vcfdesk.data.device.DeviceSnapshot.rawExtra(
+                        com.ilukezippo.vcfdesk.data.device.DeviceSnapshot.RawSettings("com.example.phone", "Phone", "1", null, "0"),
+                    ),
+                ),
+            ),
+        )
+        val google = src.seed(
+            person(3).copy(
+                extras = listOf(
+                    com.ilukezippo.vcfdesk.core.model.Extra(
+                        "google",
+                        """{"resourceName":"people/c3","userDefined":[{"key":"k","value":"v"}],""" +
+                            """"memberships":[{"contactGroupMembership":{"contactGroupResourceName":"contactGroups/starred"}}]}""",
+                    ),
+                ),
+            ),
+        )
+        val plain = src.seed(person(2))
+        val runner = BulkRunner(BackupStore(dir()))
+        val ids = listOf(rich.id, google.id, plain.id)
+
+        val pv = runner.preview(src, ids, BulkOp.CopyTo(target, null, move = true))
+        val lost = pv.map { d -> d.changes.firstOrNull { it.label == BulkRunner.LOST_LABEL }?.after }
+        assertEquals("Name 1: some details won't move — organization units, SIP address, starred", lost[0])
+        assertEquals("Name 3: some details won't move — userDefined, starred", lost[1])
+        assertNull(lost[2])
+        // a copy leaves the originals as they are: no warning
+        assertTrue(runner.preview(src, ids, BulkOp.CopyTo(target, null, move = false)).all { d -> d.changes.none { it.label == BulkRunner.LOST_LABEL } })
+
+        // the run proceeds as previewed; the copies carry none of the source's own snapshots
+        runner.run(src, ids, BulkOp.CopyTo(target, null, move = true)) { _, _ -> }
+        assertEquals(3, target.all().size)
+        assertTrue(target.all().all { c -> c.extras.none { it.kind == "device-row" || it.kind == "device-raw" || it.kind == "google" } })
+    }
 }

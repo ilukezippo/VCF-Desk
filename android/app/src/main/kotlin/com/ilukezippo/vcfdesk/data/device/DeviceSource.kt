@@ -89,7 +89,10 @@ class DeviceSource(
     override val id: SourceId = SourceId.Device
     private val refreshes = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
-    private class RawInfo(val id: Long, val type: String?, val name: String?, val deleted: Boolean, val version: String?)
+    private class RawInfo(
+        val id: Long, val type: String?, val name: String?, val deleted: Boolean, val version: String?,
+        val starred: String? = null, val ringtone: String? = null, val voicemail: String? = null,
+    )
     private class GroupInfo(val id: Long, val title: String, val type: String?, val name: String?)
 
     // ---- reading ----
@@ -127,8 +130,11 @@ class DeviceSource(
         val raw = queryRaws("${RawContacts._ID}=?", arrayOf(id)).firstOrNull { it.id == rawId && !it.deleted }
             ?: throw NoSuchElementException("no device contact $id")
         val titles = queryGroups().associate { it.id to it.title }
-        val rows = queryData(listOf(rawId))[rawId].orEmpty()
-        val c = contactOf(raw, rows, titles)
+        val rows = queryData(listOf(rawId), full = true)[rawId].orEmpty()
+        // what the model doesn't cover, so undoing a delete or move can re-create it in this account
+        val snapshot = DeviceMapper.unmodelledRows(rows, titles).map(DeviceSnapshot::rowExtra) +
+            DeviceSnapshot.rawExtra(DeviceSnapshot.RawSettings(raw.type, raw.name, raw.starred, raw.ringtone, raw.voicemail))
+        val c = contactOf(raw, rows, titles).let { it.copy(extras = it.extras + snapshot) }
         val display = readDisplayPhoto(rawId)
         // PHOTO_FILE_ID set: a full-size photo exists, and the thumbnail is no substitute for it
         val hasDisplayPhoto = rows.any { it.mimetype == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE && it.values["data14"] != null }
@@ -147,13 +153,17 @@ class DeviceSource(
     private fun Cursor.str(col: String) = getColumnIndex(col).let { if (it < 0 || isNull(it)) null else getString(it) }
 
     private fun queryRaws(selection: String, args: Array<String>): List<RawInfo> {
-        val proj = arrayOf(RawContacts._ID, RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME, RawContacts.DELETED, RawContacts.VERSION)
+        val proj = arrayOf(
+            RawContacts._ID, RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME, RawContacts.DELETED, RawContacts.VERSION,
+            RawContacts.STARRED, RawContacts.CUSTOM_RINGTONE, RawContacts.SEND_TO_VOICEMAIL,
+        )
         val out = ArrayList<RawInfo>()
         resolver.query(RawContacts.CONTENT_URI, proj, selection, args, null)?.use { c ->
             while (c.moveToNext()) {
                 out += RawInfo(
                     c.getLong(0), c.str(RawContacts.ACCOUNT_TYPE), c.str(RawContacts.ACCOUNT_NAME), c.getInt(3) != 0,
                     c.str(RawContacts.VERSION),
+                    c.str(RawContacts.STARRED), c.str(RawContacts.CUSTOM_RINGTONE), c.str(RawContacts.SEND_TO_VOICEMAIL),
                 )
             }
         }
@@ -191,8 +201,12 @@ class DeviceSource(
     private val dataProjection = arrayOf(Data._ID, Data.RAW_CONTACT_ID, Data.MIMETYPE, Data.IS_PRIMARY, Data.IS_SUPER_PRIMARY) +
         (1..15).map { "data$it" }
 
-    /** Data rows grouped by raw contact; [rawIds] null reads every row. Only Photo rows' data15 blob is read. */
-    private fun queryData(rawIds: List<Long>?, all: Array<String> = emptyArray()): Map<Long, List<DataRow>> {
+    /**
+     * Data rows grouped by raw contact; [rawIds] null reads every row. Only Photo rows' data15 blob
+     * is read, unless [full]: then every row's data15 too (text in values, a blob of at most
+     * [DeviceSnapshot.MAX_BLOB] bytes as the row's blob).
+     */
+    private fun queryData(rawIds: List<Long>?, all: Array<String> = emptyArray(), full: Boolean = false): Map<Long, List<DataRow>> {
         val out = HashMap<Long, MutableList<DataRow>>()
         fun read(selection: String?, args: Array<String>, keep: Set<Long>?) {
             resolver.query(Data.CONTENT_URI, dataProjection, selection, args, DATA_ORDER)?.use { c ->
@@ -203,9 +217,14 @@ class DeviceSource(
                     val mime = c.getString(2) ?: continue
                     val values = HashMap<String, String?>()
                     for (i in 3 until iBlob) values[c.getColumnName(i)] = if (c.isNull(i)) null else c.getString(i)
-                    val blob = if (mime == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE &&
-                        c.getType(iBlob) == Cursor.FIELD_TYPE_BLOB
-                    ) c.getBlob(iBlob) else null
+                    val isPhoto = mime == ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE
+                    val blob = when {
+                        c.getType(iBlob) != Cursor.FIELD_TYPE_BLOB -> null
+                        isPhoto -> c.getBlob(iBlob)
+                        full -> runCatching { c.getBlob(iBlob) }.getOrNull()?.takeIf { it.size <= DeviceSnapshot.MAX_BLOB }
+                        else -> null
+                    }
+                    if (full && !isPhoto && c.getType(iBlob) != Cursor.FIELD_TYPE_BLOB && !c.isNull(iBlob)) values[Data.DATA15] = c.getString(iBlob)
                     out.getOrPut(raw) { ArrayList() } += DataRow(c.getLong(0), mime, values, blob)
                 }
             }
@@ -228,6 +247,16 @@ class DeviceSource(
         } catch (e: IOException) {
             null
         }
+    }
+
+    /** Ids of every live group of account [a], system groups included. */
+    private fun accountGroupIds(a: AccountKey): Set<Long> {
+        val out = HashSet<Long>()
+        val proj = arrayOf(Groups._ID, Groups.ACCOUNT_TYPE, Groups.ACCOUNT_NAME)
+        resolver.query(Groups.CONTENT_URI, proj, "${Groups.DELETED}=0", emptyArray(), null)?.use { c ->
+            while (c.moveToNext()) if (accountKey(c.str(Groups.ACCOUNT_TYPE), c.str(Groups.ACCOUNT_NAME)) == a) out += c.getLong(0)
+        }
+        return out
     }
 
     private fun groupIdsFor(all: List<GroupInfo>, type: String?, name: String?): Map<String, Long> {
@@ -517,6 +546,9 @@ class DeviceSource(
             val type = acct.type
             val name = acct.name
             val groupIds = groupIdsFor(queryGroups(), type, name)
+            // every group of the account, system ones included: a snapshot's membership row is
+            // re-inserted only while its group still exists
+            val allGroupIds by lazy { accountGroupIds(acct) }
             val batcher = Batcher(
                 onDone = { batch, ids ->
                     batch.forEachIndexed { i, p ->
@@ -539,16 +571,26 @@ class DeviceSource(
                     batch.forEach { p -> res.fail(p.key, p.newGroups.firstNotNullOfOrNull { groupErrors[it] } ?: why) }
                 },
             )
-            fun rawInsert() = ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
+            fun rawInsert(snap: DeviceSnapshot.RawSettings?) = ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
                 .withValue(RawContacts.ACCOUNT_TYPE, type)
                 .withValue(RawContacts.ACCOUNT_NAME, name)
+                .apply {
+                    snap?.starred?.trim()?.toIntOrNull()?.let { withValue(RawContacts.STARRED, it) }
+                    snap?.ringtone?.let { withValue(RawContacts.CUSTOM_RINGTONE, it) }
+                    snap?.voicemail?.trim()?.toIntOrNull()?.let { withValue(RawContacts.SEND_TO_VOICEMAIL, it) }
+                }
                 .withYieldAllowed(true).build()
             cs.forEachIndexed { i, c ->
-                val rows = DeviceMapper.diff(emptyList(), c.copy(photo = c.photo ?: c.thumbnail), groupIds)
+                // re-created in the account it was read from (undo): put back what the model lacks too
+                val snap = DeviceSnapshot.raw(c.extras)?.takeIf { accountKey(it.type, it.name) == acct }
+                val kept = if (snap == null) emptyList() else DeviceSnapshot.rows(c.extras).filter { r ->
+                    r.mimetype != GroupMembership.CONTENT_ITEM_TYPE || r.values["data1"]?.trim()?.toLongOrNull() in allGroupIds
+                }.map { RowOp.Insert(it) }
+                val rows = DeviceMapper.diff(emptyList(), c.copy(photo = c.photo ?: c.thumbnail), groupIds) + kept
                 val newGroups = rows.filterIsInstance<RowOp.JoinNewGroup>().mapTo(LinkedHashSet()) { it.title }
                 // too big for one batch: create the raw contact first, then add rows by its literal id
                 val alone = { gids: Map<String, Long> ->
-                    val r = resolver.applyBatch(ContactsContract.AUTHORITY, arrayListOf(rawInsert()))
+                    val r = resolver.applyBatch(ContactsContract.AUTHORITY, arrayListOf(rawInsert(snap)))
                     val newId = ContentUris.parseId(requireNotNull(r[0].uri))
                     rows.map { opsFor(newId, 0, it, false) { t -> GroupRef.Id(gids.getValue(t)) } }.chunked(MAX_OPS).forEach {
                         resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(it))
@@ -557,7 +599,7 @@ class DeviceSource(
                 }
                 batcher.add(
                     Pending(key(i), rows.size + 1 + newGroups.size, rows.sumOf { it.bytes() }, acct, newGroups, alone) { base, g ->
-                        listOf(rawInsert()) + rows.map { opsFor(null, base, it, false, group = g) }
+                        listOf(rawInsert(snap)) + rows.map { opsFor(null, base, it, false, group = g) }
                     },
                 )
             }

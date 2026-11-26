@@ -274,6 +274,28 @@ object PeopleMapper {
         return false
     }
 
+    /** Top-level person keys the model reads (or that only describe the record). */
+    private val MODELLED_KEYS = MASK_ORDER.toSet() + PER_RECORD
+
+    /**
+     * What [c]'s Google person holds that a copy elsewhere won't get, readably: unmodelled keys
+     * ("userDefined", "occupations"…), "starred", and organizations or names beyond the first.
+     * Empty for a contact that isn't from Google.
+     */
+    fun unmodelledFields(c: Contact): List<String> {
+        val p = persons(c).filterNotNull().firstOrNull() ?: return emptyList()
+        val out = ArrayList<String>()
+        for ((k, v) in p) {
+            if (k in MODELLED_KEYS) continue
+            if (v is JsonArray && v.isEmpty()) continue
+            out += k
+        }
+        if (groupRefs(p).contains("contactGroups/starred")) out += "starred"
+        if (orgEntries(p).size > 1) out += "more organizations"
+        if (p.own("names").size > 1) out += "more names"
+        return out
+    }
+
     // ---- comparing ----
 
     private fun nameKey(n: Name) = listOf(n.prefix, n.first, n.middle, n.last, n.suffix, n.phoneticFirst, n.phoneticLast, n.display)

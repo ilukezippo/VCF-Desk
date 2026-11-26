@@ -125,6 +125,8 @@ class MainActivity : ComponentActivity() {
                             when (val t = holder.keepEditing()) {
                                 EditorHolder.PendingTarget.Selection -> vm.clearSelection()
                                 is EditorHolder.PendingTarget.SourceSwitch -> vm.switchSource(t.back)
+                                // Back already took the detail pane away: show the editor again
+                                EditorHolder.PendingTarget.Leave -> { openRequest = holder.current.value?.id }
                                 else -> {}
                             }
                         }
